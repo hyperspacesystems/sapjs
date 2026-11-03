@@ -87,7 +87,7 @@ const page = `<!doctype html>
       <a href="./how-it-works.html">How it works</a>
       <a href="./demos.html">Demos</a>
       <a href="./llms.txt">llms.txt</a>
-      <a href="https://github.com/panphora/sapjs">GitHub</a>
+      <a href="https://github.com/hyperspacesystems/sapjs">GitHub</a>
     </nav>
   </div>
 </header>
