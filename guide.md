@@ -1,28 +1,25 @@
-# Building malleable document apps with sapjs
+# Building apps in an HTML file with SapJS
 
-Ask for an expense tracker in one HTML file and the usual result is an `expenses` array, a `render()` function that rebuilds the table from it, and a save step that writes the array into a `<script>` tag. That works until something edits the page directly. An undo, a hand edit or a live sync merge changes the table, and the array still holds the old numbers. Live sync is the ClayJS `sync` plugin. It merges each saved edit into the other open copies of the file: other tabs, and on Hyperclay Local and hyperclay.com, other devices.
+SapJS keeps an app's data in the page itself.
 
-In a sapjs app, there is no array of records that you maintain. Every change runs a pass: one run that reads the page, computes and paints. Every pass rebuilds the records from the page. Here are two pieces of the expense tracker from section 9.1, exactly as they sit in the saved file:
+Each record is an element, its fields are attributes and text on that element, and totals, counts and filtered lists are computed from the records. Every change runs one pass that reads the page, computes and paints.
 
-```html
-<tr item data-id="e-groc" state="data-category" data-category="food">
-  <td><input bind="what" persist value="Groceries"></td>
-  <td><input type="number" step="0.01" bind="amount" persist value="42.5"></td>
-  …
-</tr>
-…
-<output id="total" calc:total="sum(state.expenses, 'amount')" text:usd2="state.total">$54.50</output>
-```
+Undo, hand edits and live sync merges all change the page, so no records can fall out of step with it.
 
-The `<tr>` is the expense. Its fields are its attributes and the bound controls inside it. The `$54.50` is the total, which sapjs computed from the rows and painted into the page. Change the groceries amount to 54.5 and the output reads `$66.50`. Save, and the file holds `value="54.5"` and `$66.50`.
+**Skip SapJS if your page is flat and no value depends on another value.** Write static HTML and let the file save changes back to itself. The ClayJS script and a few `editable` elements may be all you need.
 
-This guide shows how to build an app that way: where each piece of data goes, which sapjs feature fits each part of the app, and the traps. It is for an LLM agent or a developer building one app in one file, such as a tracker, a Kanban board, a notes list or a CRM. Read it top to bottom before writing code.
+Use SapJS when the page has records and values computed from them: totals, counts, filtered lists, forms that add records.
+
+Each library owns one job:
+
+- SapJS owns reactive state derived from the DOM.
+- ClayJS owns saving, editing and sync. A SapJS app that must save also needs [ClayJS](https://clayjs.com/guide.md) and a host that accepts saves.
 
 What you need:
 
-- A browser. A sapjs app runs from a file opened directly, with no server and no build step.
-- To save edits back into the file: ClayJS and a host that writes saves, such as HTML Clay, Hyperclay Local or hyperclay.com. A file opened from disk shows the app but cannot save it. Edits made there are lost when the tab closes. Section 12 of the [ClayJS guide](https://clayjs.com/guide.md) compares the hosts.
-- A page without a strict Content Security Policy. sapjs compiles expressions with `new Function`, so a policy without `unsafe-eval` breaks every expression on the page.
+- A browser. A SapJS app runs from a file opened directly, with no server and no build step.
+- To save edits back into the file: ClayJS and a host that writes saves, such as HTML Clay, Hyperclay Local or hyperclay.com. A file opened from disk shows the app but cannot save it. Edits made there are lost when the tab closes. Section 9 of the [ClayJS guide](https://clayjs.com/guide.md) compares the hosts.
+- A page without a strict Content Security Policy. SapJS compiles expressions with `new Function`, so a policy without `unsafe-eval` breaks every expression on the page.
 
 What this guide does not cover:
 
@@ -30,9 +27,13 @@ What this guide does not cover:
 - How ClayJS saves, syncs and switches between edit mode and view mode. That is the [ClayJS guide](https://clayjs.com/guide.md).
 - Apps that are mostly canvas drawing, network calls or third-party library code. Write those in plain JavaScript.
 
-The sapjs test suite mounts every worked app in section 9. It checks that each one loads with no errors, no warnings and zero writes, and it exercises the adds, edits and removals described under each app.
+The SapJS test suite mounts every worked app in section 9. It checks that each one loads with no errors, no warnings and zero writes, and it exercises the adds, edits and removals described under each app.
 
 ## 1. The one rule
+
+An app that keeps a second copy of its data drifts the first time something edits the page directly. This section gives the rule that prevents that, and shows how one pass applies it.
+
+Everyone needs this section. Every later section applies its rule.
 
 The saved DOM is the data. Each record is an element in the file, and its fields are attributes and text on that element. Saving the page saves the app.
 
@@ -42,24 +43,30 @@ Three rules follow from it, and every later section applies them:
 - Derive everything else. Counts, totals, filtered lists and the open card's editor are computed from the records on every pass. Never store them as data.
 - Keep per-tab state out of the file. The search text, the open card and the selected tab are not data.
 
-sapjs fits this because every pass rebuilds its state from the page. Every change runs one pass:
+SapJS fits this because every pass rebuilds its state from the page. Every change runs one pass:
 
-1. sapjs walks the app and reads every declared field, bound control and list from the live page into objects. An unchanged plain list row keeps its object, with the fields from its last read written back (see below).
+1. SapJS walks the app and reads every declared field, bound control and list from the live page into objects. An unchanged plain list row keeps its object, with the fields from its last read written back (see below).
 2. It runs the `calc:` expressions in dependency order.
-3. It paints the results back into the page. A paint is an attribute such as `text=`, `show=` or `class:` that sapjs evaluates on every pass, writing only when the value changed.
+3. It paints the results back into the page. A paint is an attribute such as `text=`, `show=` or `class:` that SapJS evaluates on every pass, writing only when the value changed.
 4. It keeps those objects until the next pass replaces them, or, for an unchanged plain row, writes that row's fields onto its kept object again.
 
 So no copy of a saved field outlives the next pass. Transient fields are the only state that lives only in memory. They hold per-tab state (section 6).
 
-To make a pass cheaper, sapjs remembers the raw strings it read from an item record's attributes and bound text, and reads them again only after the page reports that element changed. sapjs has its own observer for this, so a change it hears about late or not at all still clears the copy. That copy is a string or `null` exactly as the DOM held it. A control's value is always read live. A plain record (no live control, transient field, nested list or scope, `calc:` or object value inside it) also keeps its row object between passes while its element and everything inside it are unchanged: the pass writes its declared fields back onto that object and skips walking it. A record that changed gets a new object, and properties a format added to a kept row stay on it until the row changes. A full pass (mount, `Sap.refresh()` or a live sync resync) drops every copy and every kept row. At 5,000 records in jsdom, a body edit reads 20,091 values instead of 50,085, and its pass takes 26.7 ms instead of 37.8 ms.
+To make a pass cheaper, SapJS remembers the raw strings it read from an item record's attributes and bound text, and reads them again only after the page reports that element changed. SapJS has its own observer for this, so a change it hears about late or not at all still clears the copy. That copy is a string or `null` exactly as the DOM held it. A control's value is always read live. A plain record (no live control, transient field, nested list or scope, `calc:` or object value inside it) also keeps its row object between passes while its element and everything inside it are unchanged: the pass writes its declared fields back onto that object and skips walking it. A record that changed gets a new object, and properties a format added to a kept row stay on it until the row changes. A full pass (mount, `Sap.refresh()` or a live sync resync) drops every copy and every kept row. At 5,000 records in jsdom, a body edit reads 20,091 values instead of 50,085, and its pass takes 26.7 ms instead of 37.8 ms.
+
+Live sync is the ClayJS `sync` plugin. It merges each saved edit into the other open copies of the file: other tabs, and on Hyperclay Local and hyperclay.com, other devices.
 
 A live sync merge, an undo, a devtools edit and a keystroke all reach the app the same way. Each one changes the page, and the next pass reads the page. Undo and redo leave one gap, in controls a person typed into, and section 8, step 2 closes it.
 
-## 2. When to use sapjs
+## 2. When to use SapJS
 
-A finished sapjs app is one `<main sap>` element with no render code: its records and views are declared in markup. The few commands that need JavaScript go in an inline handler or a short script.
+Some parts of an app belong in SapJS attributes and some belong in plain JavaScript. This section says which is which, so the app does not grow a render function.
 
-Use sapjs attributes for:
+Skip this section if your app has no network calls, files, clipboard, canvas, libraries or one-off commands, because all of it then goes in SapJS attributes.
+
+A finished SapJS app is one `<main sap>` element with no render code: its records and views are declared in markup. The few commands that need JavaScript go in an inline handler or a short script.
+
+Use SapJS attributes for:
 
 - totals, counts, averages and anything else computed from records;
 - lists that are sorted, filtered or grouped views of records;
@@ -76,7 +83,11 @@ If the app is growing a large render function, a record field or an `each=` view
 
 ## 3. Start from the skeleton
 
-This file loads ClayJS and sapjs, mounts the app inside `<main>` and prints one line in the console:
+An app needs the right script tags, an app root and a way to tell that it mounted. This section gives a file to start from and the checks that show it mounted.
+
+Skip this section if your file already loads SapJS and its console shows a `sap ✓` line.
+
+This file loads ClayJS and SapJS, mounts the app inside `<main>` and prints one line in the console:
 
 ```html
 <!doctype html>
@@ -102,13 +113,13 @@ This file loads ClayJS and sapjs, mounts the app inside `<main>` and prints one 
 
 - `autosave` on `<html>` makes ClayJS save after edits, on a host that accepts saves. Cmd+S (Ctrl+S) saves without it.
 - `sap` on `<main>` marks the app root. Every `[sap]` root mounts by itself on load. There is no init call.
-- The `<style>` rule hides template rows. A template row is the `[item][template]` element in a list, which new records are cloned from. sapjs adds the same rule at runtime, but the file renders before any script runs, so write it yourself.
+- The `<style>` rule hides template rows. A template row is the `[item][template]` element in a list, which new records are cloned from. SapJS adds the same rule at runtime, but the file renders before any script runs, so write it yourself.
 - `clay.js` saves and syncs the file. The plugin list loads live sync, drag sorting, undo and a save indicator.
 - `clay-router.js` is optional. Keep it only when the app opens records through the URL hash (section 7).
 - `exclude=richclay` leaves out ClayJS rich text. Remove it from the URL when the app has rich-text fields (section 7).
-- `sap.js` is the sapjs build that ClayJS serves.
+- `sap.js` is the SapJS build that ClayJS serves.
 
-To run sapjs without saving, replace all the script tags with this one:
+To run SapJS without saving, replace all the script tags with this one:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/@panphora/sapjs/dist/sap.min.js"></script>
@@ -129,6 +140,10 @@ The counts depend on the app, and the timing changes on every run. The app mount
 A failed app prints a `sap ✗` block for each error instead. Each block names the code, the element and the problem, and usually the attribute and the fix. A `sap ✗` summary line follows the blocks.
 
 ## 4. Design the records
+
+Each field of a record needs a place in the page where SapJS can read it and a save can keep it. This section shows how to write a record, which field kind fits each value, and how to nest lists.
+
+Skip this section if your records are already written as `[item]` elements with a `data-id`, and you know what `Sap(el)` and `$key` mean.
 
 A finished record is one element that carries all of its own data. This card has an id, a due date, a done flag and a title:
 
@@ -152,10 +167,10 @@ A text leaf is an element with no child elements, such as the `<span bind="title
 | A value with no visible control | `state="data-due"` on the record | `item.due` | `data-due="2026-10-20"` |
 | A number | `state="data-points:num"` | `item.points` | `data-points="3"` |
 | A yes/no flag that CSS selects on | `state="data-done:presence"` | `item.done` | `data-done` present or absent |
-| A yes/no value stored as `true` or `false` | `state="data-flag:bool"` | `item.flag` | `data-flag="true"` or `data-flag="false"`. Choose it when CSS or code outside sapjs reads the attribute as the word (`[data-flag="true"]`). Expressions see a boolean either way. Choose `:presence` when CSS or code checks whether the attribute is there. |
+| A yes/no value stored as `true` or `false` | `state="data-flag:bool"` | `item.flag` | `data-flag="true"` or `data-flag="false"`. Choose it when CSS or code outside SapJS reads the attribute as the word (`[data-flag="true"]`). Expressions see a boolean either way. Choose `:presence` when CSS or code checks whether the attribute is there. |
 | A nested list | `items="checks"` on a child container | `item.checks` | child `[item]` elements |
 
-`bind` reads and writes a text leaf's text, but it does not make the text editable. Typing in place needs `contenteditable` on the leaf. Under ClayJS, write a saved leaf as `<span bind="title" editmode:contenteditable inert-contenteditable="plaintext-only">`, which becomes editable in edit mode only. Inside a `<template>`, write `editmode:contenteditable contenteditable="plaintext-only"` instead, because the edit-mode transform does not reach template content (ClayJS guide 4.4).
+`bind` reads and writes a text leaf's text, but it does not make the text editable. Typing in place needs `contenteditable` on the leaf. Under ClayJS, write a saved leaf as `<span bind="title" editmode:contenteditable inert-contenteditable="plaintext-only">`, which becomes editable in edit mode only. Inside a `<template>`, write `editmode:contenteditable contenteditable="plaintext-only"` instead, because the edit-mode transform does not reach template content (ClayJS guide 3.9).
 
 Three terms appear in the rules below:
 
@@ -165,7 +180,7 @@ Three terms appear in the rules below:
 
 Rules for records:
 
-- Put `state=` on the record element itself. sapjs reads `state=` only on a scope. On any other element it has no effect and reports no error.
+- Put `state=` on the record element itself. SapJS reads `state=` only on a scope. On any other element it has no effect and reports no error.
 - Give every record a `data-id`. Live sync pairs elements across tabs by it. Write `data-id=""` on the template row. Each new record then gets a fresh `data-id`, and fresh values for every `id` and `data-id` inside it.
 - Use `data-*` attributes for fields with no control. They never collide with HTML's own attribute names. `state="data-due"` reads as `item.due`, the same way `el.dataset` does.
 - Use `:presence` for flags. A `[data-done]` selector and `hasAttribute` then mean what they say. `:bool` writes the word `"false"`, and a presence selector still matches that.
@@ -190,6 +205,10 @@ Three forms of template appear in this guide: the `template` attribute on a row 
 
 ## 5. Build views over the records
 
+A filtered or sorted list must neither copy the records nor change them. This section shows how to draw a view with `each=`, and how to hide records when the records themselves are the visible list.
+
+Skip this section if the page shows every record in its saved order, with no search or filter.
+
 A finished view shows the records in a different order or subset, and leaves the records alone. This list shows the open cards, soonest first, with a checkbox that ticks the card:
 
 ```html
@@ -200,7 +219,7 @@ A finished view shows the records in a different order or subset, and leaves the
 </ul>
 ```
 
-`each=` takes an expression that returns an array. sapjs clones the `<template>` once per array element and places the rows after it, in array order. Inside a row, `item` is the array element.
+`each=` takes an expression that returns an array. SapJS clones the `<template>` once per array element and places the rows after it, in array order. Inside a row, `item` is the array element.
 
 - Rows are matched by `key=`, which defaults to `item.$key`. A reorder moves the existing rows instead of rebuilding them, so focus and scroll inside a row survive.
 - View rows carry `clay="editor-ui"`. ClayJS never saves or syncs them, and each tab draws its own. They never count as mount writes.
@@ -208,7 +227,7 @@ A finished view shows the records in a different order or subset, and leaves the
 - `trigger-remove` in a row removes the record. `Sap(el)` called on an element in a row returns the record's proxy.
 - `calc:` does not run inside view rows. Compute the value on the record, or in the `each=` expression.
 
-Filter in an `each=` view. Do not filter by putting `show=` on saved records. `show=` writes a `hidden` attribute into the record, and under ClayJS that attribute saves and syncs to every peer. Never remove a record to filter it either, because totals and counts read every record.
+Filter in an `each=` view. Do not filter by putting `show=` on saved records. `show=` writes a `hidden` attribute into the record. ClayJS treats that attribute as derived and never syncs it, but a save still writes the saving tab's filter into the file. Never remove a record to filter it either, because totals and counts read every record.
 
 When the records themselves are the visible list, such as a board the user drags cards on, hide the non-matching records with a stylesheet. Paint the stylesheet into a `<style>` element inside the sap root, marked `clay="freeze"`. `clay="freeze"` marks a ClayJS region that saves its contents as they were at load, and never saves or syncs later changes. So the hiding rule stays in this tab. This example is for a board whose cards are a top-level `items="cards"` list:
 
@@ -231,6 +250,10 @@ When the records themselves are the visible list, such as a board the user drags
 Keep the records as the main surface when the user edits structure. A `sortable` drag, rich text and in-place editing act on the elements they touch. View rows are never saved, so a drag inside a view moves nothing in the file. Make the records themselves the board or the table, and use views for everything secondary.
 
 ## 6. Put each kind of state in its place
+
+A value in the wrong place saves the wrong thing into the file: search text that should stay in one tab, or a total that should be computed. This section gives each kind of value one home.
+
+Skip this section if every value in your app is a saved record field, with nothing per-tab and nothing computed.
 
 Every value in a finished app belongs to one of three kinds, and each kind has one home:
 
@@ -264,21 +287,25 @@ Compute derived values with `calc:` or an inline expression, and show them with 
 
 `calc:total` computes a field named `total`. `text:usd2` formats it as dollars with two decimals. In the `<span>`, `count(item.checks, c => c.done)` counts the card's ticked checklist items, so a card with one of two items ticked shows `1/2`.
 
-Paint the computed values into the file. When the saved file already shows `$54.50`, the first pass changes nothing, and sapjs reports `mount writes 0`. When the file disagrees, sapjs paints the correct value at load. Under ClayJS, a painted value is derived: it never starts an autosave and never counts as unsaved. If the file's painted values still differ from the page after a repaint, for example because an agent wrote a record and left the old paint, one clean tab with autosave on saves the painted page. Without ClayJS, sapjs logs a `W30` warning and the value goes out with the next real save.
+Paint the computed values into the file. When the saved file already shows `$54.50`, the first pass changes nothing, and SapJS reports `mount writes 0`. When the file disagrees, SapJS paints the correct value at load. Under ClayJS, a painted value is derived: it never starts an autosave and never counts as unsaved. If the file's painted values still differ from the page after a repaint, for example because an agent wrote a record and left the old paint, one clean tab with autosave on saves the painted page. Without ClayJS, SapJS logs a `W30` warning and the value goes out with the next real save.
 
 Where a paint goes depends on whether every tab computes the same value:
 
-- A paint computed only from the records, such as a total or a count, is ordinary saved content. Under ClayJS a merge leaves painted values out and sapjs repaints them from the merged records, so two tabs that changed different records end with the right total and no conflict.
+- A paint computed only from the records, such as a total or a count, is ordinary saved content. Under ClayJS a merge leaves painted values out and SapJS repaints them from the merged records, so two tabs that changed different records end with the right total and no conflict.
 - Agents and data API rules read and write records, never painted values. A painted value on disk can lag its record until a tab repaints and saves it.
 - A paint that differs per tab goes inside a `clay="freeze"` element (section 5). That covers anything computed from today's date, the browser's locale or the search box. Each tab fills its own copy. Section 7 explains why the wrapper is `clay="freeze"` and not `clay="editor-ui"`.
 
 ## 7. Edit one record in detail
 
+An editor that opens one record can save a second copy of that record into the file. This section shows two ways to build an editor that does not: the record as the modal, and a `detail=` panel.
+
+Skip this section if people edit records in place in the list and nothing opens.
+
 In a finished app, clicking a card opens it for editing, and typing in the editor changes the card. There are two ways to build that.
 
 ### The record is the modal
 
-Keep the detail fields inside the record element, hidden on the card face by CSS. When the record is open, show the record element itself as an overlay. The pattern is from ClayJS guide 9.5. It needs the `clay-router.js` line from the skeleton in section 3.
+Keep the detail fields inside the record element, hidden on the card face by CSS. When the record is open, show the record element itself as an overlay. The pattern is from ClayJS guide 8.5. It needs the `clay-router.js` line from the skeleton in section 3.
 
 ```html
 <ol class="cards" items="cards" route="card">
@@ -323,7 +350,7 @@ Nothing is copied, so there is nothing to write back. A peer's edit to the open 
 `state.open` holds the open card's `$key`. A `set:open="item.$key"` on each card sets it on click.
 
 - The list path walks through nested lists. `lists.cards` finds a card in any list's `cards`.
-- On a `<dialog>`, sapjs calls `showModal()` when a record matches the key and `close()` when none does.
+- On a `<dialog>`, SapJS calls `showModal()` when a record matches the key and `close()` when none does.
 - When the key is a plain `state.NAME`, as in `detail="lists.cards by state.open"`, closing the dialog by Esc or a `method="dialog"` button clears it. The next click on the same card opens it again.
 - With any other key expression, Esc or a close button closes the dialog and leaves the key alone. The dialog stays closed until the key changes.
 - Wrap every `detail=` panel in `clay="freeze"`, a `<div>` or `<article>` panel as well as a dialog. The panel's controls are painted with the open record's values. Outside a freeze wrapper, those values save as a second copy of the record. On a dialog, `showModal()` also writes an `open` attribute, and the wrapper keeps it out of the saved file. A dialog without a wrapper gets the warning `W31`.
@@ -337,22 +364,26 @@ Use the record-as-modal shape when the detail holds rich text, needs a shareable
 
 ## 8. Work with ClayJS
 
-With ClayJS loaded, a sapjs app saves, syncs and undoes as one file. Most of that takes no code. The rest is the five steps under "What you do".
+A save only sees what is in the page's markup, so typed values can miss the file and per-tab values can reach it. This section lists what ClayJS and SapJS handle by themselves and what you must do.
+
+Skip this section if your app runs without ClayJS and never saves.
+
+With ClayJS loaded, a SapJS app saves, syncs and undoes as one file. Most of that takes no code. The rest is the five steps under "What you do".
 
 What happens by itself:
 
-- sapjs uses the ClayJS mutation hub, the single watcher ClayJS keeps for page changes. So its own paints never start an autosave and never enter the undo history.
+- SapJS uses the ClayJS mutation hub, the single watcher ClayJS keeps for page changes. So its own paints never start an autosave and never enter the undo history.
 - A live sync merge, an undo and a redo each run a full pass. After a merge the pass runs before ClayJS records any baseline.
-- ClayJS treats what a paint writes as derived: the attribute an `attr:` names, the class token a `class:` names, the `--` property a `css:` names, the children of a `text` element, and `hidden` under `show`. Comparisons, the dirty check, undo and merges leave them out.
-- ClayJS loads the sapjs core by itself on any page with a `[sap]` root: records and paints, without `calc:`, `each`, `detail`, `effect`, `invalid`, the actions and `Sap(el)`. Those halt with `E50`, which names full sapjs. Add the `sap.js` tag for them; the markup stays the same, and full sapjs takes the page over from the core.
-- ClayJS mounts sapjs in a boot phase, after `clay="freeze"` regions record their markup and visitor drafts restore, and the boot baseline settles on the painted page.
-- A route change from the ClayJS router fires `clay:route`, and sapjs runs a pass on it.
+- ClayJS treats what a paint writes as derived, so comparisons, the dirty check, undo and merges leave it out ([ClayJS guide 7.11](https://clayjs.com/guide.md)).
+- ClayJS loads the SapJS core by itself on any page with a `[sap]` root: records and paints, without `calc:`, `each`, `detail`, `effect`, `invalid`, the actions and `Sap(el)`. Those halt with `E50`, which names full SapJS. Add the `sap.js` tag for them; the markup stays the same, and full SapJS takes the page over from the core.
+- ClayJS mounts SapJS in a boot phase, after `clay="freeze"` regions record their markup and visitor drafts restore, and the boot baseline settles on the painted page.
+- A route change from the ClayJS router fires `clay:route`, and SapJS runs a pass on it.
 - `confirm=` uses `clay.confirm` when the `clay-ui.js` satellite is loaded. A satellite is an optional ClayJS script loaded beside `clay.js`.
 
 What you do:
 
-1. Put `persist` on bound `<input>`, `<textarea>` and `<select>` controls in records, so typed and chosen values reach the saved attributes.
-2. Re-sync controls after an undo and a redo. The browser keeps a control's typed value separately from its `value` attribute, or from a textarea's text. Undo and redo restore only the markup, and sapjs reads the typed value. Without a re-sync, totals and the next save keep the stale typed value. A live sync merge moves the typed values itself, except in the control the person is typing in. This script re-syncs bound inputs, textareas and selects that carry `persist`. Add it after the `clay.js` and `sap.js` tags. Attach the listeners inside `clay.ready.then(...)`, because `clay.undo` does not exist until ClayJS has booted:
+1. Put `persist` on bound `<input>`, `<textarea>` and `<select>` controls in records ([ClayJS guide 4.4](https://clayjs.com/guide.md)).
+2. Re-sync controls after an undo and a redo. The browser keeps a control's typed value separately from its `value` attribute, or from a textarea's text. Undo and redo restore only the markup, and SapJS reads the typed value. Without a re-sync, totals and the next save keep the stale typed value. A live sync merge moves the typed values itself, except in the control the person is typing in. This script re-syncs bound inputs, textareas and selects that carry `persist`. Add it after the `clay.js` and `sap.js` tags. Attach the listeners inside `clay.ready.then(...)`, because `clay.undo` does not exist until ClayJS has booted:
 
    ```js
    const app = document.querySelector("main[sap]");
@@ -373,16 +404,20 @@ What you do:
 
    The undo listeners need the ClayJS `undo` plugin (`?plugins=...,undo`), which the skeleton loads.
 3. Put per-tab paints and every `detail=` panel in `clay="freeze"` (sections 5, 6 and 7).
-4. Mark controls a script adds at runtime, such as toolbars and menus, `clay="editor-ui"`. View rows already are. ClayJS leaves `editor-ui` elements out of the saved file, so the script must build them again on every load, cloned from an unmarked `<template>`.
+4. Mark controls a script adds at runtime, such as toolbars and menus, `clay="editor-ui"` ([ClayJS guide 8.2](https://clayjs.com/guide.md)). View rows already are.
 5. Show controls only in edit mode with `show-when:editmode="true"`. ClayJS sets `editmode` on `<html>` at load and removes it from every save. Nothing in the saved file hides these controls, so a viewer sees them until the scripts load. Add this rule to the stylesheet to keep them hidden before any script runs:
 
    ```css
    html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
    ```
 
-   In view mode, sapjs sets `hidden` on these controls at load unless the `clay-options` satellite has already started. That write logs a `W30` warning and a nonzero mount writes count for viewers. It is harmless: a viewer cannot save. In edit mode nothing is written.
+   In view mode, SapJS sets `hidden` on these controls at load unless the `clay-options` satellite has already started. That write logs a `W30` warning and a nonzero mount writes count for viewers. It is harmless: a viewer cannot save. In edit mode nothing is written.
 
 ## 9. Three worked apps
+
+Assembling an app from the parts above leaves a lot to get right. Each app here is complete and covered by the test suite, so you can copy the closest one and change it.
+
+Skip this section if your app already mounts and you do not need a pattern to copy.
 
 Each app below is a complete `<main sap>`, written with its computed values already painted, so it mounts with zero writes. Replace the skeleton's entire `<main>…</main>` element with one complete app below.
 
@@ -532,6 +567,10 @@ A searchable, sorted list of notes, and an editor for the selected note.
 
 ## 10. Checklist and traps
 
+An app can look right and still save the wrong thing. This section gives the checks to run before calling an app done, and a table that maps each symptom to its cause and fix.
+
+Skip this section if your app is not finished and nothing is misbehaving. Come back to it before you call the app done.
+
 Before calling an app done, check each item. The console's "mount writes N" and `Sap.status().apps[0].mountWrites` are the same count.
 
 - [ ] The console shows a `sap ✓` line for every app, and `Sap.status().ok` is `true`.
@@ -554,12 +593,12 @@ Traps, keyed by what you see:
 | a bound `<span>` shows the text but cannot be typed in | `bind` does not make a text leaf editable | add `contenteditable`, or under ClayJS `editmode:contenteditable inert-contenteditable="plaintext-only"` (section 4) |
 | `E43` on a `bind` in a view row | the field belongs neither to the record nor to the scope that holds the `each=` element | declare it on the record, or with `state=` on that scope |
 | typing in a view row changes nothing in the file | the row's field resolves to per-tab state | declare the field on the record to save it |
-| filtered-out records are saved and synced with `hidden` | `show=` on saved records writes `hidden` | filter in an `each=` view, or paint a hiding rule into a frozen `<style>` (section 5) |
+| filtered-out records are saved with `hidden` | `show=` on saved records writes `hidden` | filter in an `each=` view, or paint a hiding rule into a frozen `<style>` (section 5) |
 | the editor dialog opens for every visitor | the key is saved | declare it `transient` |
 | the saved file holds the open record's values a second time, in the editor's controls | the `detail=` panel is outside `clay="freeze"` | wrap it in `clay="freeze"` |
 | the dialog is missing after a save | it was inside `clay="editor-ui"` | wrap it in `clay="freeze"` |
 | `W31` on a dialog | the `<dialog detail>` has no `clay="freeze"` ancestor | wrap it in `clay="freeze"` |
 | a computed value read right after a write is stale | `calc:` values and paints update in the next pass, which runs after your code returns | call `Sap.refresh()` before reading |
 | a total keeps an old number after an undo or a redo | the attribute was restored, not the control's on-screen value | add `syncControls` (section 8, step 2) |
-| `W30` and a nonzero mount writes count for viewers, in a root with `show-when` controls | in view mode sapjs sets `hidden` on them, unless `clay-options` has already started | nothing; a viewer cannot save, and in edit mode nothing is written |
-| every expression fails under a strict CSP | expressions compile with `new Function` | allow `unsafe-eval`, or build the app without sapjs |
+| `W30` and a nonzero mount writes count for viewers, in a root with `show-when` controls | in view mode SapJS sets `hidden` on them, unless `clay-options` has already started | nothing; a viewer cannot save, and in edit mode nothing is written |
+| every expression fails under a strict CSP | expressions compile with `new Function` | allow `unsafe-eval`, or build the app without SapJS |
