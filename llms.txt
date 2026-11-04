@@ -13,8 +13,10 @@ out of the source. The npm package is `@panphora/sapjs`, the browser global is `
 the license is MIT-0 (MIT No Attribution).
 
 To build an app (a tracker, a board, a notes list) rather than look up one attribute,
-read https://saphtml.com/guide.md first. It covers where each piece of data goes, which
-feature fits each part of an app, three complete tested apps, and a trap table.
+read https://saphtml.com/guide.md. It covers where each piece of data goes, which
+feature fits each part of an app, three complete tested apps, and a trap table. Not sure
+you need SapJS? Start at https://clayjs.com/docs/start.md and pick the problems you are
+solving.
 
 sapjs competes with Alpine plus a little hand-written JavaScript, not with React. It suits
 trackers, calculators, forms with real validation, small CRUD apps and prototypes that fit
