@@ -98,6 +98,11 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-05
+
+### Changed
+- No user-facing changes.
+
 ## [0.7.0] - 2026-10-30
 
 ### Added
