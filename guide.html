@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Building apps in an HTML file with SapJS</title>
+<title>Building an app in one HTML file with sapjs</title>
 <meta name="description" content="How to build malleable document apps (trackers, boards, notes) in one HTML file with sapjs and ClayJS.">
 <link rel="canonical" href="https://saphtml.com/guide.html">
 <link rel="alternate" type="text/markdown" href="./guide.md">
@@ -50,8 +50,8 @@
   </div>
 </header>
 <div class="wrap">
-<details class="toc"><summary>Contents</summary><ol><li><a href="#1-the-one-rule">1. The one rule</a></li><li><a href="#2-when-to-use-sapjs">2. When to use SapJS</a></li><li><a href="#3-start-from-the-skeleton">3. Start from the skeleton</a></li><li><a href="#4-design-the-records">4. Design the records</a></li><li><a href="#5-build-views-over-the-records">5. Build views over the records</a></li><li><a href="#6-put-each-kind-of-state-in-its-place">6. Put each kind of state in its place</a></li><li><a href="#7-edit-one-record-in-detail">7. Edit one record in detail</a></li><li><a href="#8-work-with-clayjs">8. Work with ClayJS</a></li><li><a href="#9-three-worked-apps">9. Three worked apps</a></li><li><a href="#10-checklist-and-traps">10. Checklist and traps</a></li></ol></details>
-<h1>Building apps in an HTML file with SapJS</h1>
+<details class="toc"><summary>Contents</summary><ol><li><a href="#read-only-as-far-as-your-app-needs">Read only as far as your app needs</a></li><li><a href="#1-the-one-rule">1. The one rule</a></li><li><a href="#2-when-to-use-sapjs">2. When to use SapJS</a></li><li><a href="#3-start-from-the-skeleton">3. Start from the skeleton</a></li><li><a href="#4-design-the-records">4. Design the records</a></li><li><a href="#5-build-views-over-the-records">5. Build views over the records</a></li><li><a href="#6-put-each-kind-of-state-in-its-place">6. Put each kind of state in its place</a></li><li><a href="#7-edit-one-record-in-detail">7. Edit one record in detail</a></li><li><a href="#8-work-with-clayjs">8. Work with ClayJS</a></li><li><a href="#9-three-worked-apps">9. Three worked apps</a></li><li><a href="#10-checklist-and-traps">10. Checklist and traps</a></li></ol></details>
+<h1>Building an app in one HTML file with sapjs</h1>
 <p>SapJS keeps an app&#39;s data in the page itself.</p>
 <p>Each record is an element, its fields are attributes and text on that element, and totals, counts and filtered lists are computed from the records. Every change runs one pass that reads the page, computes and paints.</p>
 <p>Undo, hand edits and live sync merges all change the page, so no records can fall out of step with it.</p>
@@ -75,6 +75,54 @@
 <li>Apps that are mostly canvas drawing, network calls or third-party library code. Write those in plain JavaScript.</li>
 </ul>
 <p>The SapJS test suite mounts every worked app in section 9. It checks that each one loads with no errors, no warnings and zero writes, and it exercises the adds, edits and removals described under each app.</p>
+<h2 id="read-only-as-far-as-your-app-needs"><a class="anchor" href="#read-only-as-far-as-your-app-needs">#</a>Read only as far as your app needs</h2>
+<p>Find the closest match to your app and read from rung 1 up to that row, then skip the rest. Add rung 6 whenever the HTML file saves with ClayJS, or skip sapjs altogether if no value on the page depends on another (<a href="#2-when-to-use-sapjs">2. When to use sapjs</a>).</p>
+<table>
+<thead>
+<tr>
+<th>Rung</th>
+<th>Example app</th>
+<th>Concepts added</th>
+<th>Sections to read</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><strong>To-do list</strong>: add, edit and tick off items in one flat list</td>
+<td><code>sap</code>, <code>items=</code>, <code>item</code>, <code>template</code>, <code>data-id</code> (<code>$key</code>), <code>scope=</code>, <code>state=</code> (<code>data-*</code>, <code>:num</code>, <code>:presence</code>, <code>:bool</code>), <code>bind</code>, <code>contenteditable</code> (<code>editmode:contenteditable</code>), <code>persist</code>, <code>trigger-add=</code></td>
+<td><a href="#1-the-one-rule">1. The one rule</a>, <a href="#3-start-from-the-skeleton">3. Start from the skeleton</a>, <a href="#4-design-the-records">4. Design the records</a>, <a href="#10-checklist-and-traps">10. Checklist and traps</a></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Expense tracker</strong>: multi-field add form, row delete, live totals and subtotals</td>
+<td>composer <code>&lt;form&gt;</code> (<code>trigger-add=</code>, <code>default=</code>), <code>trigger-remove</code>, <code>confirm=</code>, <code>calc:</code>, <code>sum()</code>, <code>count()</code>, paints (<code>text=</code>, <code>text:usd2</code>, <code>show=</code>, <code>class:</code>)</td>
+<td><a href="#6-put-each-kind-of-state-in-its-place">6. Put each kind of state in its place</a> (<a href="#derived-state">Derived state</a>), <a href="#91-expense-tracker">9.1 Expense tracker</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Searchable directory</strong>: filter and sort per tab without changing saved records</td>
+<td><code>transient</code> (in <code>state=</code> and on controls), <code>each=</code> with <code>&lt;template&gt;</code>, <code>key=</code>, <code>set:</code>, <code>&lt;style clay=&quot;freeze&quot; text=&quot;...&quot;&gt;</code></td>
+<td><a href="#5-build-views-over-the-records">5. Build views over the records</a>, <a href="#per-tab-state">Per-tab state</a></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Notes app</strong>: select a record and edit it in a side panel, <code>&lt;dialog&gt;</code> or routed modal</td>
+<td><code>detail=</code> inside <code>clay=&quot;freeze&quot;</code>, <code>Sap(el).$add()</code>, or <code>route=</code> with <code>clay-router.js</code>, <code>clay.route.set()</code> and <code>[route-active]</code></td>
+<td><a href="#7-edit-one-record-in-detail">7. Edit one record in detail</a> (<a href="#the-record-is-the-modal">The record is the modal</a>, <a href="#a-detail-editor">A detail= editor</a>), <a href="#93-notes">9.3 Notes</a></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Kanban board</strong>: draggable card lists with a nested checklist edited in a <code>&lt;dialog&gt;</code></td>
+<td>nested <code>items=</code> lists, shared <code>&lt;template items=&quot;...&quot;&gt;</code> blueprints, dotted list paths in <code>detail=</code>, <code>each=</code> and <code>trigger-add=</code> inside <code>detail=</code>, <code>sortable=</code></td>
+<td><a href="#nested-lists-and-shared-blueprints">Nested lists and shared blueprints</a>, <a href="#92-kanban-board">9.2 Kanban board</a></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Published team tracker</strong>: saved and live-synced on ClayJS, with undo on typed inputs and a visitor view</td>
+<td><code>autosave</code>, live <code>sync</code>, <code>clay.undo</code> control re-sync (<code>syncControls</code> and <code>Sap.refresh()</code>), <code>clay=&quot;editor-ui&quot;</code> on runtime controls, <code>show-when:editmode=&quot;true&quot;</code></td>
+<td><a href="#8-work-with-clayjs">8. Work with ClayJS</a></td>
+</tr>
+</tbody></table>
 <h2 id="1-the-one-rule"><a class="anchor" href="#1-the-one-rule">#</a>1. The one rule</h2>
 <p>An app that keeps a second copy of its data drifts the first time something edits the page directly. This section gives the rule that prevents that, and shows how one pass applies it.</p>
 <p>Everyone needs this section. Every later section applies its rule.</p>
