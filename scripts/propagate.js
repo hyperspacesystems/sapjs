@@ -10,15 +10,24 @@
 // destination to skip quietly.
 //
 // `--only <client>` narrows the table to one client's destinations; `--check`
-// writes nothing and exits 1 naming every destination that is missing or stale.
+// writes nothing and exits 1 naming every destination that is missing or stale;
+// `--root <dir>` replaces the workspace folder the destinations resolve against.
 
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { buildSync } from 'esbuild'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
-const workspace = path.join(rootDir, '..')
+// `--root <dir>` resolves every destination against <dir> instead of the folder
+// holding sapjs, so a run from a worktree can write into another worktree.
+const rootIndex = process.argv.indexOf('--root')
+if (rootIndex !== -1 && !process.argv[rootIndex + 1]) {
+  console.error('Error: --root needs a directory.')
+  process.exit(1)
+}
+const workspace = rootIndex === -1 ? path.join(rootDir, '..') : path.resolve(process.argv[rootIndex + 1])
 
 const distFile = path.join(rootDir, 'dist', 'sap.min.js')
 const serializeSrc = path.join(rootDir, 'src', 'control-serialize.js')
@@ -84,6 +93,20 @@ const OWNERSHIP_HEADER = `// GENERATED — do not edit. Vendored from sapjs/src/
 // table. Edit the sapjs source and re-run.
 `
 
+// The sheet's grid codec, bundled into one ES module for hyper-html-api, which
+// reads and writes sheets on every host. Not minified, so a host's stack trace
+// points at readable code.
+const codecEntry = path.join(rootDir, 'src', 'grid', 'codec', 'index.js')
+
+const CODEC_HEADER = `// GENERATED — do not edit. Bundled from sapjs/src/grid/codec/ via sapjs
+// \`node scripts/propagate.js --only hyper-html-api\`. Edit the sapjs source and re-run.
+`
+
+function buildCodecVendor() {
+  const result = buildSync({ entryPoints: [codecEntry], bundle: true, format: 'esm', write: false, legalComments: 'none' })
+  return CODEC_HEADER + '\n' + result.outputFiles[0].text
+}
+
 function readDist() {
   return fs.readFileSync(distFile, 'utf8').trim()
 }
@@ -114,7 +137,8 @@ const DESTINATIONS = [
   { client: 'clayjs', path: 'clayjs/src/vendor/control-serialize.vendor.js', build: buildSerializeVendor },
   { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/control-serialize.vendor.js', build: buildSerializeVendor },
   { client: 'clayjs', path: 'clayjs/src/vendor/sap-core.vendor.js', build: buildSapCoreEsm },
-  { client: 'clayjs', path: 'clayjs/src/vendor/sap-ownership.vendor.js', build: buildOwnershipVendor }
+  { client: 'clayjs', path: 'clayjs/src/vendor/sap-ownership.vendor.js', build: buildOwnershipVendor },
+  { client: 'hyper-html-api', path: 'hyper-html-api/src/codecs/sheet.vendor.js', build: buildCodecVendor, needsDist: false }
 ]
 
 const args = process.argv.slice(2)
@@ -136,7 +160,7 @@ if (!targets.length) {
   process.exit(1)
 }
 
-if (!fs.existsSync(distFile)) {
+if (targets.some(destination => destination.needsDist !== false) && !fs.existsSync(distFile)) {
   console.error('Error: dist/sap.min.js not found. Run "npm run build" first.')
   process.exit(1)
 }

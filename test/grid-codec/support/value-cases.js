@@ -1,0 +1,36 @@
+// The value rule's worked cases, shared by value.test.js and the host vectors.
+export const CELLS = [
+  ["zero", { text: "0" }, 0],
+  ["false is text", { text: "false" }, "false"],
+  ["FALSE is a boolean", { text: "FALSE" }, false],
+  ["leading zero is text", { text: "02134" }, "02134"],
+  ["forced text", { text: "02134", t: true }, "02134"],
+  ["forced text number", { text: "123", t: true }, "123"],
+  ["equals sign is text", { text: "=literal" }, "=literal"],
+  ["formula shown 80%", { text: "80%", n: true, f: "=B2/B$5", v: "0.8" }, 0.8],
+  ["formatted money", { text: "$1,200.00", n: true, v: "1200" }, 1200],
+  ["date is a serial", { text: "Mar 14, 2026", n: true, v: "46095", fmt: "mmm d, yyyy" }, 46095],
+  ["covered cell is blank", { text: "", hidden: true }, null],
+  ["formatted empty cell is blank", { text: "", fmt: "0%" }, null],
+  ["spaces kept", { text: "  a  " }, "  a  "],
+  ["16 digits stay text", { text: "4111111111111111" }, "4111111111111111"],
+  ["15 digits are a number", { text: "123456789012345" }, 123456789012345],
+  ["exponent is text", { text: "1e5" }, "1e5"],
+  ["plus sign is text", { text: "+5" }, "+5"],
+  ["grouping is text", { text: "1,200" }, "1,200"],
+  ["minus zero", { text: "-0" }, 0],
+  ["null cell", null, null],
+];
+
+export const SHOWN = [
+  [0.1 + 0.2, "0.3"],
+  [1e21, "1000000000000000000000"],
+  [1e-7, "0.0000001"],
+  [-1234.5, "-1234.5"],
+  [0.8, "0.8"],
+  [-0, "0"],
+  [true, "TRUE"],
+  [false, "FALSE"],
+  [null, ""],
+  ["text", "text"],
+];

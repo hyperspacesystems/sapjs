@@ -1,0 +1,6 @@
+# Runs the sapjs jest suite on a throwaway test box: `testbox run`.
+# See ~/Documents/GitHub/bash_commands/testbox/README.md.
+TESTBOX_REPO=sapjs
+TESTBOX_SETUP='npm ci --no-audit --no-fund'
+TESTBOX_COMMAND='npm test --'
+TESTBOX_TIMEOUT=${TESTBOX_TIMEOUT:-30m}

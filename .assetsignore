@@ -16,3 +16,5 @@ LICENSE
 .DS_Store
 shot-*.png
 wrangler.jsonc
+.testbox
+test-box-out/

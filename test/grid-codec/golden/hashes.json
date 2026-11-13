@@ -1,0 +1,10 @@
+{
+  "budget-20k": {
+    "bytes": 565620,
+    "sha256": "401f7c46a0503dedd5f6537e99a31f51cae3aee9a9ea821d83358fc248fb49d8"
+  },
+  "wide-100k": {
+    "bytes": 2854104,
+    "sha256": "5aa25157dc4e4d56c60422bba6c13c1833bb8568370542dda5b3a5eb929bd1f0"
+  }
+}
