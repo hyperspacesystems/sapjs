@@ -115,7 +115,11 @@ test("a table that misses stays in rest while a valid grid after it is cut", () 
   expect(joinGrids(cut.rest, marker, src, cut.regions)).toBe(src);
 });
 
-test("cutGrids on wide-100k takes under 60 ms", () => {
+// The 60 ms budget is a speed check, not a correctness check: on a loaded machine it measures
+// the machine. It runs only when asked, for example SAPJS_PERF=1 npx jest test/grid-codec/cut.test.js.
+const perfTest = process.env.SAPJS_PERF === "1" ? test : test.skip;
+
+perfTest("cutGrids on wide-100k takes under 60 ms", () => {
   const src = documentHtml(FIXTURES["wide-100k"]());
   const marker = holeMarker(src);
   let best = Infinity;
