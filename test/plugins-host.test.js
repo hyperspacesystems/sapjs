@@ -1144,6 +1144,25 @@ describe("a plugin that did not load", () => {
     expect(root.querySelector("div").textContent).toBe("drawn");
   });
 
+  test("online: a page with no failed plugin adds no window listener; the first failure adds one", async () => {
+    const added = [];
+    const add = window.addEventListener;
+    window.addEventListener = function (type, ...rest) { added.push(type); return add.call(this, type, ...rest); };
+    try {
+      boot();
+      mount(`<main sap><output text="1 + 1"></output></main>`);
+      await tick(4);
+      expect(added.filter((t) => t === "online")).toEqual([]);
+      Sap.plugins.declare(chart);
+      Sap.plugins.loader = () => Promise.reject(new Error("offline"));
+      mount(`<main sap><div chart>saved</div></main>`);
+      await tick(12);
+      expect(added.filter((t) => t === "online")).toEqual(["online"]);
+    } finally {
+      window.addEventListener = add;
+    }
+  });
+
   test("retry: by name tries that plugin only, and resolves when the try has settled", async () => {
     boot();
     const asked = [];

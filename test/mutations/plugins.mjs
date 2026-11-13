@@ -88,7 +88,7 @@ mutate({
   "e52-marker": host("the asking element gets no marker", '        withDomMutationPaused(() => setBeacon(at, "E52"));\n', "", "E52: the first element that asked", /toBe/),
   "e52-paused": host("the marker write is delivered as a change", 'withDomMutationPaused(() => setBeacon(at, "E52"));', 'setBeacon(at, "E52");', "E52: the marker write is not a change", /toEqual/),
   "e52-element": host("E52 is always reported at the root", "pass.wanted.get(name)?.[0] || app.root", "app.root", "E52: the first element that asked", /toEqual/),
-  online: host("coming back online retries nothing", "  w.addEventListener?.(\"online\", () => api.retry());\n", "", "online: when the browser comes back online", /toBe|toEqual/),
+  online: host("coming back online retries nothing", '!w.addEventListener?.("online", () => api.retry())', '!(() => {})("online", () => api.retry())', "online: when the browser comes back online", /toBe|toEqual/),
   "retry-named": host("retry(name) retries every failed plugin", "settle(name ? [name] : [...failed.keys()])", "settle([...failed.keys()])", "retry: by name tries that plugin only", /toEqual/),
   "ready-outside": { ...host("ready counts a boundary outside any app", 'docRoot.closest?.("[sap]") ? [docRoot] : docRoot.querySelectorAll("[sap]")) {\n      for (const n of listed(el.closest("[sap]")))', '[docRoot.documentElement || docRoot]) {\n      for (const n of listed(el.closest("[sap]") || el))', "16. Sap.plugins.ready is null with nothing to wait for", /toBe/), test: PROTO },
   "ready-listed": host("ready does not count a plugins attribute", '      for (const n of listed(el.closest("[sap]"))) found.add(n);\n', "", "ready: a plugins= list on a root counts", /toEqual/),

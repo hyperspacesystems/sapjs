@@ -2384,6 +2384,7 @@ ${src}` : `"use strict"; return (${src});`;
     const marked = /* @__PURE__ */ new Set();
     const helpers = {};
     let off = false;
+    let listening;
     const w = globalThis;
     const shared = Array.isArray(w.sapPlugins) ? w.sapPlugins : w.sapPlugins == null ? w.sapPlugins = [] : [];
     const src = w.document?.currentScript?.src || "";
@@ -2523,6 +2524,7 @@ ${src}` : `"use strict"; return (${src});`;
         () => apiOf(name),
         (error) => {
           failed.set(name, error);
+          listening ||= !w.addEventListener?.("online", () => api.retry());
           wake("plugin-failed:" + name);
           document.dispatchEvent(new CustomEvent("sap:plugin-failed", { detail: { plugin: name, error } }));
           throw error;
@@ -2614,7 +2616,6 @@ ${src}` : `"use strict"; return (${src});`;
     Sap2.flush = flush;
     for (const facts of Object.values(MANIFEST)) declare(facts);
     shared.slice().forEach(tryUse);
-    w.addEventListener?.("online", () => api.retry());
     return function dispose() {
       off = true;
       for (const plugin of installed2.values()) plugin.dispose?.();

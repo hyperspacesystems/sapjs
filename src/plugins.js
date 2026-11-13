@@ -31,6 +31,7 @@ export function createPlugins(runtime, Sap, scheduler) {
   const marked = new Set(); // elements that carry the E52 beacon
   const helpers = {};
   let off = false; // true once this engine has handed the page to another
+  let listening; // coming back online retries failed plugins; listened for once one fails
 
   const w = globalThis;
   // Every definition this page has seen, shared by every engine on it. A value another
@@ -200,6 +201,7 @@ export function createPlugins(runtime, Sap, scheduler) {
       () => apiOf(name),
       (error) => {
         failed.set(name, error);
+        listening ||= !w.addEventListener?.("online", () => api.retry());
         // The pass this starts reports E52 in every app that still asks for the plugin.
         wake("plugin-failed:" + name);
         document.dispatchEvent(new CustomEvent("sap:plugin-failed", { detail: { plugin: name, error } }));
@@ -309,7 +311,6 @@ export function createPlugins(runtime, Sap, scheduler) {
 
   for (const facts of Object.values(MANIFEST)) declare(facts);
   shared.slice().forEach(tryUse);
-  w.addEventListener?.("online", () => api.retry());
 
   // For Sap.unmount: this engine has handed the page over and runs no more passes. Its
   // plugins let go, and a download still on its way installs nothing here.
