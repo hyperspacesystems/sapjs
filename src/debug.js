@@ -2,7 +2,7 @@
 // line is the machine-readable mount contract; status/report are its JSON twins.
 // why/doctor live in debug-full.js: they are developer tools, not core surface.
 
-import { REGISTRY } from "./errors.js";
+import { walkVisible } from "./registry.js";
 
 const ACTION_RE = /^(set:|move:|sort:|trigger-add$|trigger-remove$|trigger-reset$)/;
 
@@ -10,12 +10,14 @@ export function rootLabel(root) {
   return `${root.tagName.toLowerCase()}[sap]`;
 }
 
-function countActions(root) {
-  let n = 0;
-  for (const el of root.querySelectorAll("*")) {
-    for (const a of el.attributes) if (ACTION_RE.test(a.name)) { n++; break; }
-  }
-  for (const a of root.attributes) if (ACTION_RE.test(a.name)) { n++; break; }
+// What the green line counts, in one walk that stays out of closed plugin boundaries.
+function countMarkup(root) {
+  const n = { actions: 0, lists: 0, rows: 0 };
+  walkVisible(root, (el) => {
+    if (el.hasAttribute("items")) n.lists++;
+    if (el !== root && el.hasAttribute("item") && !el.hasAttribute("template")) n.rows++;
+    if ([...el.attributes].some((a) => ACTION_RE.test(a.name))) n.actions++;
+  });
   return n;
 }
 
@@ -30,9 +32,7 @@ export function createDebug(runtime) {
       fields: s.fields || 0,
       calcs: s.calcs || 0,
       paints: s.paints || 0,
-      actions: countActions(root),
-      lists: (root.hasAttribute("items") ? 1 : 0) + root.querySelectorAll("[items]").length,
-      rows: root.querySelectorAll("[item]:not([template])").length,
+      ...countMarkup(root),
       warnings: app.diag.warnings.length,
       errors: app.diag.errors.length,
       mountWrites: app._mountWrites || 0,
@@ -60,14 +60,6 @@ export function createDebug(runtime) {
     );
   }
 
-  function printGreenLines() {
-    for (const app of runtime.apps()) {
-      const line = greenLine(app);
-      if (app.diag.errors.length || app.halted) console.error(line);
-      else console.log(line);
-    }
-  }
-
   function report() {
     const errors = [];
     const warnings = [];
@@ -85,5 +77,5 @@ export function createDebug(runtime) {
     return on;
   }
 
-  return { status, report, debug, greenLine, printGreenLines, REGISTRY };
+  return { status, report, debug, greenLine };
 }

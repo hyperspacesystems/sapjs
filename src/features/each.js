@@ -114,6 +114,7 @@ function reconcileEach(pass, el, ctx) {
 
 export const eachFeature = {
   name: "each",
+  order: 30,
   begin(pass) {
     pass.eachList = [];
   },

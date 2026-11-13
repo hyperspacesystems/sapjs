@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/sap.js",
   "exports": {
-    ".": "./src/sap.js"
+    ".": "./src/sap.js",
+    "./plugins/*": "./src/plugins/*.js"
   },
   "jsdelivr": "dist/sap.min.js",
   "files": [

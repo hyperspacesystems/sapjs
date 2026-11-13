@@ -71,6 +71,26 @@ describe("reactivity: calc, paint, and the one write path", () => {
     expect(root2.querySelector("#o2").getAttribute("sap-error")).toBe("E24");
   });
 
+  test("preserve-on-error: the report names the attribute that holds the failing expression", () => {
+    mount(`
+      <main sap>
+        <b text="state.none.a">kept</b>
+        <b text:usd="state.none.b">kept</b>
+        <b show="state.none.c">kept</b>
+        <b attr:title="state.none.d">kept</b>
+        <b class:on="state.none.e">kept</b>
+        <b css:pct="state.none.f">kept</b>
+      </main>`);
+    expect(Sap.report().errors.map((e) => [e.code, e.attr, e.expr])).toEqual([
+      ["E24", "text", "state.none.a"],
+      ["E24", "text:usd", "state.none.b"],
+      ["E24", "show", "state.none.c"],
+      ["E24", "attr:title", "state.none.d"],
+      ["E24", "class:on", "state.none.e"],
+      ["E24", "css:pct", "state.none.f"],
+    ]);
+  });
+
   test("attr: on a native boolean paints by presence", async () => {
     const root = mount(`
       <main sap>

@@ -26,12 +26,30 @@ const NONE = Object.freeze([]);
 const features = [];
 const boundaries = {};
 const paintKinds = {};
+let host = null;
 
+// Within each phase, features run in ascending `order` (100 when a feature gives none),
+// then in the order they registered. A plugin that installs late still runs in its place.
 export function registerFeature(feature) {
   if (features.includes(feature)) return;
   features.push(feature);
+  features.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   if (feature.boundary) Object.assign(boundaries, feature.boundary);
   if (feature.paintKinds) Object.assign(paintKinds, feature.paintKinds);
+}
+
+export function unregisterFeature(feature) {
+  const i = features.indexOf(feature);
+  if (i < 0) return;
+  features.splice(i, 1);
+  for (const name of Object.keys(feature.boundary || {})) if (boundaries[name] === feature.boundary[name]) delete boundaries[name];
+  for (const kind of Object.keys(feature.paintKinds || {})) if (paintKinds[kind] === feature.paintKinds[kind]) delete paintKinds[kind];
+}
+
+// The plugin host is told, after every pass, which plugins the app asked for and did
+// not have.
+export function setPassHost(fn) {
+  host = fn;
 }
 
 export function runPass(app, opts = {}) {
@@ -49,17 +67,21 @@ export function runPass(app, opts = {}) {
     dropPlans();
     dropReads();
   }
+  app._inPass = true;
   const plans = beginPlans(app.root);
   // The whole pass runs inside one DOM-mutation pause: every engine-derived write
   // (intake strips, id stamps, default materialization, paints, effects, validity,
   // beacons) is vacuumed away from the mutation bridge so it never schedules another
   // pass, and away from undo/autosave so a single user edit collapses to one entry.
   // No-op standalone with no hub/observer present. See mutation-bridge.js.
+  let pass = null;
   try {
-    withDomMutationPaused(() => runPassBody(app, opts));
+    withDomMutationPaused(() => { pass = runPassBody(app, opts); });
   } finally {
+    app._inPass = false;
     endPlans(plans);
   }
+  if (host && pass) host(app, pass);
   if (app._viewsChanged) {
     app._viewsChanged = false;
     app.root.dispatchEvent(new CustomEvent("sap:views-updated", { bubbles: true }));
@@ -73,6 +95,14 @@ function runPassBody(app, opts) {
   const pending = [];        // declared defaults missing from the DOM (candidates to materialize)
   const whenFields = new Set(); // field names a show-when/option visibility verb reads
   app.diag.errors = [];
+
+  // What the mutation bridge reported inside this app since its last pass. null means
+  // the pass cannot say what changed: every reader must read everything again.
+  const changes = opts.full || app._changes === false ? null : app._changes || NONE;
+  app._changes = null;
+  const waiting = new Set(); // plugins an expression in this app waits for
+  const wanted = new Map(); // plugin -> the elements that ask for it while it is not installed
+  const want = (names, el) => names.map((name) => wanted.get(name)?.push(el) ?? wanted.set(name, [el]));
 
   const rootCtx = { root: rootObj, state: rootObj, item: null, ownerEl: root, projection: false };
   let recording = null;
@@ -131,6 +161,12 @@ function runPassBody(app, opts) {
 
   function collectEl(el, plan, ctx) {
     let kept = false;
+    if (plan.waits) waiting.add(plan.waits);
+    if (plan.wants) {
+      want(plan.wants, el);
+      kept = true;
+    }
+    if (recording && plan.impure) recording.pure = false;
     if (plan.paints) {
       kept = true;
       for (const def of plan.paints) {
@@ -166,7 +202,8 @@ function runPassBody(app, opts) {
   }
 
   // Visit one element that belongs to the enclosing scope. Descent stops at nested
-  // boundaries (scope/items/detail/each) and skips inert subtrees (sap-ignore/template/cms-template).
+  // boundaries (scope/items/detail/each and plugin boundaries) and skips inert subtrees
+  // (sap-ignore/template/cms-template).
   function visitOwned(el, scopeObj, ctx) {
     const plan = planOf(el);
     if (plan.inert) return;
@@ -176,7 +213,14 @@ function runPassBody(app, opts) {
       else if (plan.boundary === "items") {
         collectEl(el, plan, ctx);
         handleItems(el, scopeObj, ctx);
-      } else boundaries[plan.boundary](pass, el, plan, scopeObj, ctx);
+      } else if (plan.waits) {
+        waiting.add(plan.waits);
+      } else {
+        // A plugin boundary whose plugin has not installed stays exactly as the file holds it.
+        const enter = boundaries[plan.boundary];
+        if (enter) enter(pass, el, plan, scopeObj, ctx);
+        else if (plan.wants) want(plan.wants, el);
+      }
       return;
     }
     if (!ctx.projection && !ctx.view && plan.bind != null) readBindInto(el, plan, ctx);
@@ -269,6 +313,8 @@ function runPassBody(app, opts) {
   const pass = {
     app, root, rootObj, paints, stats: { calcs: 0, lists: 0 },
     resolveDefault, collectEl, walkScope,
+    changes, full: changes === null, trigger: opts.cause || opts.trigger || "refresh",
+    waiting, wanted,
   };
 
   for (const f of features) if (f.begin) f.begin(pass);
@@ -283,7 +329,13 @@ function runPassBody(app, opts) {
 
   // Collection can halt the app: the core flags full-only markup it meets here. A
   // halted pass writes nothing, so stop before defaults, calcs, views or any paint.
-  if (app.halted) return;
+  if (app.halted) return pass;
+
+  // An expression that calls a helper of a plugin still on its way would compute from a
+  // value that is not there yet, and a calc: doing so feeds expressions that do not. So
+  // the whole app keeps what the file holds until that plugin installs: its records are
+  // read and its inputs work, and nothing is computed or painted.
+  if (waiting.size) return pass;
 
   for (const f of features) if (f.afterIntake) f.afterIntake(pass);
 
@@ -335,15 +387,14 @@ function runPassBody(app, opts) {
   if (app._debug) {
     console.log(`sap pass · trigger: ${app._lastPass.trigger} · writes ${writes}/${paints.length}`);
   }
+  return pass;
 }
 
+// The attribute a failed paint is reported under. Only a paint that runs an expression
+// can fail: text, show, attr:, class: and css:.
 function paintAttrName(def) {
-  if (def.kind === "text") return def.fmt ? "text:" + def.fmt : "text";
-  if (def.kind === "attr") return "attr:" + def.arg;
-  if (def.kind === "class") return "class:" + def.arg;
-  if (def.kind === "css") return "css:" + def.arg;
-  if (def.kind === "when") return (def.match === "hide" ? "hide-when:" : def.match === "show-not" ? "option-not:" : "show-when:") + def.field;
-  return def.kind;
+  const tail = def.kind === "text" ? def.fmt || null : def.arg;
+  return tail == null ? def.kind : def.kind + ":" + tail;
 }
 
 // Walk self + ancestors for an element carrying `field`, matching optionVisibility's
@@ -409,12 +460,8 @@ function applyPaint(def, el, value) {
         if (el._sapWhen && el.hidden) { el.hidden = false; el._sapWhen = false; return 1; }
         return 0;
       }
-      let visible;
-      if (def.match === "hide") visible = !nearestMode(el, def.field, def.values, false);
-      else if (def.match === "show-not") visible = nearestMode(el, def.field, def.values, true);
-      else visible = nearestMode(el, def.field, def.values, false);
       el._sapWhen = true;
-      const hide = !visible;
+      const hide = nearestMode(el, def.field, def.values, def.match === "show-not") === (def.match === "hide");
       if (el.hidden !== hide) {
         el.hidden = hide;
         return 1;

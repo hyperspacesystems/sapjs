@@ -7,6 +7,7 @@ import { lintApp } from "./lint.js";
 import { runPass } from "./pass.js";
 import { rehydrateControlFromAttributes } from "./control-serialize.js";
 import { draftsRestored, capability } from "./platform.js";
+import { insideClosedBoundary } from "./registry.js";
 
 const STYLE_ID = "sap-styles";
 const STYLE_TEXT =
@@ -69,7 +70,9 @@ export function mountApp(root) {
 
   // Restore any persisted textarea values from data-value before the first read,
   // so a [persist] textarea round-trips on load without a separate save step.
-  for (const ta of root.querySelectorAll("textarea[data-value]")) rehydrateControlFromAttributes(ta);
+  for (const ta of root.querySelectorAll("textarea[data-value]")) {
+    if (!insideClosedBoundary(ta)) rehydrateControlFromAttributes(ta);
+  }
 
   const t0 = now();
   runPass(appRec, { trigger: "mount", full: true });

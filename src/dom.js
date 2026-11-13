@@ -1,6 +1,7 @@
 // DOM walking that respects scope boundaries, plus declaration parsing and row keys.
 
 import { NATIVE_BOOLEANS } from "./errors.js";
+import { boundaryOf } from "./registry.js";
 
 const NATIVE_BOOLEAN_SET = new Set(NATIVE_BOOLEANS);
 const NATIVE_PROPS = { readonly: "readOnly", novalidate: "noValidate" };
@@ -31,7 +32,7 @@ export function mintId(doc, prefix = "row") {
 }
 
 export function isScopeBoundary(el) {
-  return el.hasAttribute("scope") || el.hasAttribute("items") || el.hasAttribute("detail") || el.hasAttribute("each");
+  return el.hasAttribute("scope") || el.hasAttribute("items") || el.hasAttribute("detail") || el.hasAttribute("each") || boundaryOf(el) !== null;
 }
 
 export function isInert(el) {
@@ -39,7 +40,8 @@ export function isInert(el) {
 }
 
 // Walk descendants that belong to scopeEl's own scope. Stops descent at nested
-// boundaries (scope/items/detail) and skips inert subtrees (sap-ignore/template/cms-template).
+// boundaries (scope/items/detail/each and plugin boundaries) and skips inert subtrees
+// (sap-ignore/template/cms-template).
 // visit(el, isBoundary) is called for every owned element including boundaries.
 export function walkOwned(scopeEl, visit) {
   for (let child = scopeEl.firstElementChild; child; child = child.nextElementSibling) descend(child);

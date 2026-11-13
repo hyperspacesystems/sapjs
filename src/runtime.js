@@ -10,6 +10,8 @@ import { installMutationBridge, resetMutationBridge } from "./mutation-bridge.js
 import { formats } from "./helpers.js";
 import { VERSION } from "./version.js";
 import { serializeControlToAttributes, finalizeControlForSave, rehydrateControlFromAttributes } from "./control-serialize.js";
+import { insideClosedBoundary } from "./registry.js";
+import { createPlugins } from "./plugins.js";
 
 export function createSap({ createAccessor, installInput, debugExtras }) {
   const registry = new Map(); // root element -> appRec
@@ -62,7 +64,7 @@ export function createSap({ createAccessor, installInput, debugExtras }) {
     appFor,
     isRegistered: (el) => registry.has(el),
     pruneDisconnected,
-    schedule: (app, trigger) => scheduler.schedule(app, trigger),
+    schedule: scheduler.schedule,
     runNow: (app, trigger) => scheduler.runNow(app, trigger),
     moveInto,
     placeBefore,
@@ -95,7 +97,7 @@ export function createSap({ createAccessor, installInput, debugExtras }) {
     const roots = docRoot.querySelectorAll("[sap]");
     const fresh = [];
     for (const root of roots) {
-      if (registry.has(root)) continue;
+      if (registry.has(root) || insideClosedBoundary(root)) continue;
       const appRec = mountApp(root);
       registry.set(root, appRec);
       order.push(appRec);
@@ -132,7 +134,8 @@ export function createSap({ createAccessor, installInput, debugExtras }) {
 
   Sap.version = VERSION;
   Sap.refresh = function refresh() {
-    for (const app of order) if (app.root.isConnected) scheduler.runNow(app, "refresh");
+    // A copy: a pass that starts may deliver queued changes, and those can prune `order`.
+    for (const app of order.slice()) if (app.root.isConnected) scheduler.runNow(app, "refresh");
   };
   Sap.batch = batch;
   Sap.status = debugApi.status;
@@ -164,7 +167,12 @@ export function createSap({ createAccessor, installInput, debugExtras }) {
     order.length = 0;
     resetMutationBridge();
     if (typeof teardownBridges === "function") teardownBridges();
+    disposePlugins();
   };
+
+  // Adds Sap.use, Sap.plugins and Sap.flush. Last, so a plugin cannot take a name the
+  // Sap object already has.
+  const disposePlugins = createPlugins(runtime, Sap, scheduler);
 
   return { Sap, mountAll, mount, runtime };
 }

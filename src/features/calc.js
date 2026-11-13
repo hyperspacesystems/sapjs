@@ -17,6 +17,7 @@ function depth(el) {
 
 export const calcFeature = {
   name: "calc",
+  order: 20,
   begin(pass) {
     pass.calcs = [];
   },

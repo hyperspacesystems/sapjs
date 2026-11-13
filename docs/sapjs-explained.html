@@ -49,12 +49,21 @@
       ring.push(trigger);
       if (ring.length > 8) ring.shift();
     }
-    function schedule(app, trigger) {
+    function schedule(app, trigger, changes) {
       note(trigger);
+      if (changes) {
+        if (app._broken || app.halted) app._changes = false;
+        else if (app._changes !== false) {
+          const list = app._changes || (app._changes = []);
+          for (const c of changes) list.push(c);
+        }
+        if (app._inPass) return;
+      }
       if (app._broken) {
         if (trigger === "mutation") return;
         rearm(app);
       }
+      if (!dirty.has(app)) app._trigger = trigger;
       dirty.add(app);
       if (queued) return;
       queued = true;
@@ -62,11 +71,9 @@
     }
     function drain() {
       queued = false;
-      const apps = [...dirty];
-      dirty.clear();
-      for (const app of apps) runWithBreaker(app);
+      for (const app of [...dirty]) if (dirty.delete(app)) runWithBreaker(app, false, app._trigger);
     }
-    function runWithBreaker(app, full = false) {
+    function runWithBreaker(app, full, cause) {
       if (app._broken || app.halted) return;
       app._passes = (app._passes || 0) + 1;
       if (app._passes > MAX_PASSES) {
@@ -82,18 +89,23 @@
           app._resetArmed = false;
         }, 0);
       }
-      runPass2(app, full ? { full: true } : {});
+      runPass2(app, full ? { full: true, cause } : { cause });
     }
     function runNow(app, trigger) {
       note(trigger);
       if (app._broken) rearm(app);
-      runWithBreaker(app, true);
+      runWithBreaker(app, true, trigger);
     }
     function rearm(app) {
       app._broken = false;
       app._passes = 0;
     }
-    return { schedule, runNow, rearm, ring };
+    function flushNow() {
+      const ran = queued;
+      while (queued) drain();
+      return ran;
+    }
+    return { schedule, runNow, flushNow };
   }
 
   // src/errors.js
@@ -126,6 +138,7 @@
     E42: { slug: "each-template", behavior: "ERR" },
     E43: { slug: "bind-in-each-row", behavior: "ERR" },
     E50: { slug: "needs-full-sapjs", behavior: "HALT" },
+    E52: { slug: "plugin-not-loaded", behavior: "ERR" },
     W03: { slug: "unknown-colon-attribute", behavior: "WARN" },
     W04: { slug: "expression-in-when", behavior: "WARN" },
     W30: { slug: "nonzero-mount-writes", behavior: "WARN" },
@@ -265,16 +278,6 @@
       this.warnings.push(rec);
       return rec;
     }
-    report() {
-      return {
-        ok: this.errors.length === 0 && !this.halted,
-        app: this.appName,
-        halted: this.halted,
-        haltReason: this.haltReason,
-        errors: this.errors.slice(),
-        warnings: this.warnings.slice()
-      };
-    }
   };
   function setBeacon(el, code) {
     if (el && el.getAttribute("sap-error") !== code) el.setAttribute("sap-error", code);
@@ -309,6 +312,64 @@
     return dp[m][n2];
   }
 
+  // src/registry.js
+  var OWN = ["sap", "item", "scope", "items", "detail", "each"];
+  var boundaries = /* @__PURE__ */ new Map();
+  var directives = /* @__PURE__ */ new Map();
+  var selector = "";
+  function declareFacts(facts) {
+    for (const [name, b] of Object.entries(facts.boundaries || {})) {
+      if (claimable(name)) boundaries.set(name, { name, plugin: facts.name, opaque: !!b.opaque, on: b.on || null, installed: false });
+    }
+    for (const [name, d] of Object.entries(facts.directives || {})) {
+      if (claimable(name)) directives.set(name, { name, plugin: facts.name, key: d.key, impure: !!d.impure, parse: null });
+    }
+    selector = [...boundaries.values()].map((b) => `${b.on || ""}[${b.name}]`).join(",");
+  }
+  function claimable(name, plugin) {
+    return !OWN.includes(name) && (ownerOf(name) || plugin) === plugin;
+  }
+  function setInstalled(plugin, parsers) {
+    for (const b of boundaries.values()) if (b.plugin === plugin) b.installed = !!parsers;
+    for (const d of directives.values()) if (d.plugin === plugin) d.parse = parsers && parsers[d.name] || null;
+  }
+  function ownerOf(name) {
+    return (boundaries.get(name) || directives.get(name) || {}).plugin;
+  }
+  function directiveFor(name) {
+    return directives.get(name);
+  }
+  function declaredAttr(name) {
+    return !!ownerOf(name) || directives.has(name.slice(0, name.indexOf(":") + 1));
+  }
+  function boundaryOf(el) {
+    if (!selector) return null;
+    for (const b of boundaries.values()) {
+      if (b.on && el.localName !== b.on || !el.hasAttribute(b.name)) continue;
+      return OWN.some((own) => el.hasAttribute(own)) ? null : b;
+    }
+    return null;
+  }
+  function closedBoundary(el) {
+    const b = boundaryOf(el);
+    return !!b && (b.opaque || !b.installed);
+  }
+  function insideClosedBoundary(el) {
+    if (!selector) return null;
+    for (let cur = el.parentElement; cur; cur = cur.parentElement) {
+      cur = cur.closest(selector);
+      if (!cur || closedBoundary(cur)) return cur;
+    }
+    return null;
+  }
+  function closedOwner(el) {
+    return closedBoundary(el) ? el : insideClosedBoundary(el);
+  }
+  function walkVisible(root, visit) {
+    if (visit(root) === false || closedBoundary(root)) return;
+    for (let c = root.firstElementChild; c; c = c.nextElementSibling) walkVisible(c, visit);
+  }
+
   // src/dom.js
   var NATIVE_BOOLEAN_SET = new Set(NATIVE_BOOLEANS);
   var NATIVE_PROPS = { readonly: "readOnly", novalidate: "noValidate" };
@@ -332,7 +393,7 @@
     }
   }
   function isScopeBoundary(el) {
-    return el.hasAttribute("scope") || el.hasAttribute("items") || el.hasAttribute("detail") || el.hasAttribute("each");
+    return el.hasAttribute("scope") || el.hasAttribute("items") || el.hasAttribute("detail") || el.hasAttribute("each") || boundaryOf(el) !== null;
   }
   function isInert(el) {
     return el.tagName === "TEMPLATE" || el.hasAttribute("sap-ignore") || el.hasAttribute("template") || el.hasAttribute("cms-template");
@@ -639,17 +700,48 @@
   // src/compile.js
   var ARGS = ["state", "item", "el", "root", "fmt", "num", "sum", "count", "avg", "min", "max", "plural", "days"];
   var cache = /* @__PURE__ */ new Map();
+  var helperNames = [];
+  var helperValues = [];
+  var awaited = null;
+  var owners = null;
+  var TEXT = /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[`}](?:\\.|[^`\\])*?(?:`|\$\{)|[{}]/.source;
+  function setHelpers(installed2, pending) {
+    helperNames = Object.keys(installed2);
+    helperValues = Object.values(installed2);
+    const names = [...pending.keys()].filter((name) => unclaimed(name) && !(name in installed2));
+    owners = pending;
+    awaited = names.length ? new RegExp(`${TEXT}|\\.{3}|(${names.join("|")})\\s*\\(|[\\w$.]+`, "g") : null;
+    cache.clear();
+  }
+  function isGlobal(name) {
+    return name in globalThis && globalThis[name]?.nodeType !== 1;
+  }
+  function unclaimed(name) {
+    return /^[a-z_]\w*$/i.test(name) && !ARGS.includes(name) && !isGlobal(name);
+  }
+  function isHelperName(name) {
+    try {
+      return unclaimed(name) && !!new Function(name, '"use strict"');
+    } catch {
+      return false;
+    }
+  }
+  function waitsFor(src) {
+    const open = [];
+    let m;
+    if (awaited) for (awaited.lastIndex = 0; m = awaited.exec(src); ) {
+      const [token, name] = m;
+      if (name && unclaimed(name)) return owners.get(name);
+      if (token[0] === "}" && !open.pop()?.[1]) awaited.lastIndex = m.index + 1;
+      else if (token.endsWith("{")) open.push(token);
+    }
+    return null;
+  }
   var STATE_REF = /\bstate\.([a-z][a-z0-9_]*)/g;
   var ITEM_REF = /\bitem\.([a-z][a-z0-9_]*)/g;
   function extractDeps(src) {
-    const state = /* @__PURE__ */ new Set();
-    const item = /* @__PURE__ */ new Set();
-    let m;
-    STATE_REF.lastIndex = 0;
-    while (m = STATE_REF.exec(src)) state.add(m[1]);
-    ITEM_REF.lastIndex = 0;
-    while (m = ITEM_REF.exec(src)) item.add(m[1]);
-    return { state, item };
+    const named = (ref) => new Set([...(src || "").matchAll(ref)].map((m) => m[1]));
+    return { state: named(STATE_REF), item: named(ITEM_REF) };
   }
   function compile(src, statement = false) {
     const key = (statement ? "!" : "") + src;
@@ -659,12 +751,13 @@
     try {
       const body = statement ? `"use strict";
 ${src}` : `"use strict"; return (${src});`;
-      const fn = new Function(...ARGS, body);
-      entry = { fn, src, statement, deps: extractDeps(src), error: null };
+      const fn = helperNames.length ? new Function(...helperNames, `return function(${ARGS}){${body}
+}`)(...helperValues) : new Function(...ARGS, body);
+      entry = { fn, src, statement, deps: extractDeps(src), error: null, waits: waitsFor(src) };
     } catch (err) {
-      entry = { fn: null, src, statement, deps: { state: /* @__PURE__ */ new Set(), item: /* @__PURE__ */ new Set() }, error: err };
+      entry = { fn: null, src, statement, deps: { state: /* @__PURE__ */ new Set(), item: /* @__PURE__ */ new Set() }, error: err, waits: null };
     }
-    cache.set(key, entry);
+    if (!entry.waits) cache.set(key, entry);
     return entry;
   }
   function run(entry, ctx) {
@@ -740,21 +833,25 @@ ${src}` : `"use strict"; return (${src});`;
   function clearFromRecords(records) {
     for (const rec of records) {
       if (rec.type === "attributes") {
-        if (rec.target._sapPlan) rec.target._sapPlan = null;
-      } else {
-        for (const node of rec.addedNodes) if (node.nodeType === 1) clearTree(node);
+        clearPlan(rec.target);
+      } else if (rec.addedNodes.length && !(rec.target.nodeType === 1 && closedOwner(rec.target))) {
+        for (const node of rec.addedNodes) if (node.nodeType === 1) walkVisible(node, clearPlan);
       }
     }
   }
-  function clearTree(el) {
+  function clearPlan(el) {
     if (el._sapPlan) el._sapPlan = null;
-    for (let c = el.firstElementChild; c; c = c.nextElementSibling) clearTree(c);
   }
   function planOf(el) {
     if (!cacheable) return buildPlan(el);
     const p = el._sapPlan;
     if (p && p.gen === planGen) return p;
     return el._sapPlan = buildPlan(el);
+  }
+  function expr(plan, src, statement) {
+    const entry = compile(src, statement);
+    if (entry.waits) plan.waits = entry.waits;
+    return entry;
   }
   function buildPlan(el) {
     const plan = {
@@ -774,7 +871,11 @@ ${src}` : `"use strict"; return (${src});`;
       calcs: null,
       paints: null,
       effects: null,
-      invalids: null
+      invalids: null,
+      waits: null,
+      wants: null,
+      ext: false,
+      impure: false
     };
     for (const attr of el.attributes) {
       const name = attr.name;
@@ -804,9 +905,11 @@ ${src}` : `"use strict"; return (${src});`;
             break;
           case "detail":
             plan.detail = true;
+            plan.waits = waitsFor(val) || plan.waits;
             break;
           case "each":
             plan.each = true;
+            plan.waits = waitsFor(val) || waitsFor(el.getAttribute("key")) || plan.waits;
             break;
           case "bind":
             plan.bind = val;
@@ -818,17 +921,19 @@ ${src}` : `"use strict"; return (${src});`;
             plan.decls = parseStateDecl(val);
             break;
           case "text":
-            (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: null, entry: compile(val) });
+            (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: null, entry: expr(plan, val) });
             break;
           case "show":
-            (plan.paints || (plan.paints = [])).push({ kind: "show", entry: compile(val) });
+            (plan.paints || (plan.paints = [])).push({ kind: "show", entry: expr(plan, val) });
             break;
           case "effect":
-            (plan.effects || (plan.effects = [])).push({ entry: compile(val, true) });
+            (plan.effects || (plan.effects = [])).push({ entry: expr(plan, val, true) });
             break;
           case "invalid":
-            (plan.invalids || (plan.invalids = [])).push({ entry: compile(val) });
+            (plan.invalids || (plan.invalids = [])).push({ entry: expr(plan, val) });
             break;
+          default:
+            pluginDirective(plan, name, "", val);
         }
         continue;
       }
@@ -836,19 +941,19 @@ ${src}` : `"use strict"; return (${src});`;
       const tail = name.slice(colon + 1);
       switch (head) {
         case "calc":
-          (plan.calcs || (plan.calcs = [])).push({ name: tail, entry: compile(val) });
+          (plan.calcs || (plan.calcs = [])).push({ name: tail, entry: expr(plan, val) });
           break;
         case "text":
-          (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: tail, entry: compile(val) });
+          (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: tail, entry: expr(plan, val) });
           break;
         case "attr":
-          (plan.paints || (plan.paints = [])).push({ kind: "attr", arg: tail, entry: compile(val) });
+          (plan.paints || (plan.paints = [])).push({ kind: "attr", arg: tail, entry: expr(plan, val) });
           break;
         case "class":
-          (plan.paints || (plan.paints = [])).push({ kind: "class", arg: tail, entry: compile(val) });
+          (plan.paints || (plan.paints = [])).push({ kind: "class", arg: tail, entry: expr(plan, val) });
           break;
         case "css":
-          (plan.paints || (plan.paints = [])).push({ kind: "css", arg: tail, entry: compile(val) });
+          (plan.paints || (plan.paints = [])).push({ kind: "css", arg: tail, entry: expr(plan, val) });
           break;
         case "show-when":
         case "option":
@@ -860,10 +965,28 @@ ${src}` : `"use strict"; return (${src});`;
         case "option-not":
           (plan.paints || (plan.paints = [])).push({ kind: "when", match: "show-not", field: tail, values: val.split("|") });
           break;
+        default:
+          pluginDirective(plan, head + ":", tail, val);
       }
     }
-    plan.boundary = plan.scope ? "scope" : plan.items ? "items" : plan.detail ? "detail" : plan.each ? "each" : null;
+    const pluginBoundary = boundaryOf(el);
+    plan.boundary = plan.scope ? "scope" : plan.items ? "items" : plan.detail ? "detail" : plan.each ? "each" : pluginBoundary ? pluginBoundary.name : null;
+    if (pluginBoundary && !pluginBoundary.installed) (plan.wants ||= []).push(pluginBoundary.plugin);
     return isEmpty(plan) ? emptyPlan() : plan;
+  }
+  function pluginDirective(plan, name, tail, val) {
+    const d = directiveFor(name);
+    if (!d) return;
+    if (!d.parse) {
+      (plan.wants ||= []).push(d.plugin);
+      return;
+    }
+    const def = d.parse(tail, val);
+    if (def === void 0) return;
+    (plan[d.key] || (plan[d.key] = [])).push(def);
+    plan.ext = true;
+    if (d.impure) plan.impure = true;
+    if (def && def.entry && def.entry.waits) plan.waits = def.entry.waits;
   }
   var empty = null;
   function emptyPlan() {
@@ -885,13 +1008,17 @@ ${src}` : `"use strict"; return (${src});`;
         calcs: null,
         paints: null,
         effects: null,
-        invalids: null
+        invalids: null,
+        waits: null,
+        wants: null,
+        ext: false,
+        impure: false
       });
     }
     return empty;
   }
   function isEmpty(plan) {
-    return !plan.inert && !plan.item && plan.boundary === null && plan.bind === null && !plan.transient && !plan.decls && !plan.calcs && !plan.paints && !plan.effects && !plan.invalids;
+    return !plan.inert && !plan.item && plan.boundary === null && plan.bind === null && !plan.transient && !plan.decls && !plan.calcs && !plan.paints && !plan.effects && !plan.invalids && !plan.wants && !plan.ext;
   }
 
   // src/read-cache.js
@@ -912,16 +1039,14 @@ ${src}` : `"use strict"; return (${src});`;
         continue;
       }
       for (let el = parent; el; el = el.parentElement) cells.delete(el);
-      for (const node of record.addedNodes || []) {
-        if (node.nodeType !== 1) continue;
-        cells.delete(node);
-        rows.delete(node);
-        for (const el of node.querySelectorAll("*")) {
-          cells.delete(el);
-          rows.delete(el);
-        }
-      }
+      const added = record.addedNodes;
+      if (!added || !added.length || parent && closedOwner(parent)) continue;
+      for (const node of added) if (node.nodeType === 1) walkVisible(node, forget);
     }
+  }
+  function forget(el) {
+    cells.delete(el);
+    rows.delete(el);
   }
   function keepsRows() {
     return enabled;
@@ -1277,17 +1402,26 @@ ${src}` : `"use strict"; return (${src});`;
   }
 
   // src/mutation-bridge.js
+  var NONE = [];
   var activeSource = null;
+  var pausing = 0;
+  var remount = null;
   var installed = false;
   var lateHubListener = null;
   function hubSource(M) {
     let unsub = null;
     return {
       kind: "hub",
+      // The hub delivers what the browser has queued when a pause begins.
+      flush() {
+        M.pause();
+        M.resume();
+      },
       subscribe(onChanges) {
         const ret = M.onAnyChange({ debounce: 0, require: "observed" }, onChanges);
         if (typeof ret === "function") unsub = ret;
       },
+      // The hub delivers on its own, and only when no pause is under way.
       suppress(fn) {
         M.pause();
         try {
@@ -1309,17 +1443,25 @@ ${src}` : `"use strict"; return (${src});`;
   }
   function nativeSource() {
     let observer2 = null;
+    let deliver = null;
+    function flush() {
+      const queued = observer2 ? observer2.takeRecords() : NONE;
+      if (queued.length) deliver(changesFromRecords(queued));
+    }
     return {
       kind: "native",
+      flush,
       subscribe(onChanges) {
+        deliver = onChanges;
         observer2 = new MutationObserver((records) => onChanges(changesFromRecords(records)));
-        const target = typeof document !== "undefined" && document.body || typeof document !== "undefined" && document.documentElement;
+        const target = document.body || document.documentElement;
         if (target) {
           observer2.observe(target, { childList: true, subtree: true, attributes: true, characterData: true });
         }
       },
-      suppress(fn) {
+      suppress(fn, outer) {
         const u = capability("undo");
+        if (outer) flush();
         if (u && u.pause) u.pause();
         try {
           return fn();
@@ -1341,23 +1483,26 @@ ${src}` : `"use strict"; return (${src});`;
     for (const rec of records) {
       if (rec.type === "attributes") {
         const el = rec.target;
-        if (el && el.nodeType === 1 && !inertSubtree(el)) out.push({ type: "attribute", element: el });
+        if (el && el.nodeType === 1 && !inertSubtree(el)) out.push({ type: "attribute", element: el, attribute: rec.attributeName });
       } else if (rec.type === "characterData") {
         const el = rec.target && rec.target.parentElement;
         if (el && !inertSubtree(el)) out.push({ type: "characterData", element: el });
       } else if (rec.type === "childList") {
+        const parent = rec.target;
+        if (parent.nodeType === 1 && [...rec.addedNodes, ...rec.removedNodes].some((node) => node.nodeType === 3) && !inertSubtree(parent)) {
+          out.push({ type: "characterData", element: parent });
+        }
+        const closed = rec.addedNodes.length > 0 && parent.nodeType === 1 && closedOwner(parent);
         for (const node of rec.addedNodes) {
           if (node.nodeType !== 1 || inertSubtree(node)) continue;
-          out.push({ type: "add", element: node });
-          if (node.querySelectorAll) {
-            for (const desc of node.querySelectorAll("*")) {
-              if (!inertSubtree(desc)) out.push({ type: "add", element: desc });
-            }
-          }
+          if (closed) out.push({ type: "add", element: node, parent });
+          else walkVisible(node, (el) => {
+            if (el === node || !inertSubtree(el)) out.push({ type: "add", element: el, parent });
+          });
         }
         for (const node of rec.removedNodes) {
           if (node.nodeType !== 1) continue;
-          out.push({ type: "remove", element: node, parent: rec.target });
+          out.push({ type: "remove", element: node, parent });
         }
       }
     }
@@ -1368,21 +1513,41 @@ ${src}` : `"use strict"; return (${src});`;
   }
   function scheduleAffectedApps(runtime2, changes) {
     runtime2.pruneDisconnected();
-    const affected = /* @__PURE__ */ new Set();
+    const affected = /* @__PURE__ */ new Map();
     let needRemount = false;
     for (const c of changes) {
       const target = c.type === "remove" ? c.parent : c.element;
       const app = target && runtime2.appFor(target);
-      if (app) affected.add(app);
+      if (app) {
+        const list = affected.get(app);
+        if (list) list.push(c);
+        else affected.set(app, [c]);
+      }
       if (c.type === "add" && c.element && c.element.nodeType === 1 && c.element.hasAttribute && c.element.hasAttribute("sap") && !(runtime2.isRegistered && runtime2.isRegistered(c.element))) {
         needRemount = true;
       }
     }
-    if (needRemount) runtime2.remountIfPresent();
-    for (const app of affected) if (app.root.isConnected) runtime2.schedule(app, "mutation");
+    if (needRemount) {
+      remount = runtime2.remountIfPresent;
+      if (pausing) queueMicrotask(mountFound);
+      else mountFound();
+    }
+    for (const [app, list] of affected) if (app.root.isConnected) runtime2.schedule(app, "mutation", list);
+  }
+  function mountFound() {
+    const mount2 = remount;
+    remount = null;
+    mount2?.();
   }
   function withDomMutationPaused(fn) {
-    if (activeSource) return activeSource.suppress(fn);
+    if (activeSource) {
+      const outer = !pausing++;
+      try {
+        return activeSource.suppress(fn, outer);
+      } finally {
+        pausing--;
+      }
+    }
     const u = capability("undo");
     if (u && u.pause && u.resume) {
       u.pause();
@@ -1434,18 +1599,28 @@ ${src}` : `"use strict"; return (${src});`;
     installed = false;
     lateHubListener = null;
   }
+  function flushMutationBridge() {
+    if (pausing) return;
+    if (activeSource) activeSource.flush();
+    mountFound();
+  }
 
   // src/pass.js
   var NATIVE_BOOLEAN_SET2 = new Set(NATIVE_BOOLEANS);
-  var NONE = Object.freeze([]);
+  var NONE2 = Object.freeze([]);
   var features = [];
-  var boundaries = {};
+  var boundaries2 = {};
   var paintKinds = {};
+  var host = null;
   function registerFeature(feature) {
     if (features.includes(feature)) return;
     features.push(feature);
-    if (feature.boundary) Object.assign(boundaries, feature.boundary);
+    features.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    if (feature.boundary) Object.assign(boundaries2, feature.boundary);
     if (feature.paintKinds) Object.assign(paintKinds, feature.paintKinds);
+  }
+  function setPassHost(fn) {
+    host = fn;
   }
   function runPass(app, opts = {}) {
     if (opts.breaker) {
@@ -1459,12 +1634,18 @@ ${src}` : `"use strict"; return (${src});`;
       dropPlans();
       dropReads();
     }
+    app._inPass = true;
     const plans = beginPlans(app.root);
+    let pass = null;
     try {
-      withDomMutationPaused(() => runPassBody(app, opts));
+      withDomMutationPaused(() => {
+        pass = runPassBody(app, opts);
+      });
     } finally {
+      app._inPass = false;
       endPlans(plans);
     }
+    if (host && pass) host(app, pass);
     if (app._viewsChanged) {
       app._viewsChanged = false;
       app.root.dispatchEvent(new CustomEvent("sap:views-updated", { bubbles: true }));
@@ -1477,6 +1658,11 @@ ${src}` : `"use strict"; return (${src});`;
     const pending = [];
     const whenFields = /* @__PURE__ */ new Set();
     app.diag.errors = [];
+    const changes = opts.full || app._changes === false ? null : app._changes || NONE2;
+    app._changes = null;
+    const waiting = /* @__PURE__ */ new Set();
+    const wanted = /* @__PURE__ */ new Map();
+    const want = (names, el) => names.map((name) => wanted.get(name)?.push(el) ?? wanted.set(name, [el]));
     const rootCtx = { root: rootObj, state: rootObj, item: null, ownerEl: root, projection: false };
     let recording = null;
     function resolveDefault(el, d, cacheRecord = false) {
@@ -1525,6 +1711,12 @@ ${src}` : `"use strict"; return (${src});`;
     }
     function collectEl(el, plan, ctx) {
       let kept = false;
+      if (plan.waits) waiting.add(plan.waits);
+      if (plan.wants) {
+        want(plan.wants, el);
+        kept = true;
+      }
+      if (recording && plan.impure) recording.pure = false;
       if (plan.paints) {
         kept = true;
         for (const def of plan.paints) {
@@ -1564,7 +1756,13 @@ ${src}` : `"use strict"; return (${src});`;
         else if (plan.boundary === "items") {
           collectEl(el, plan, ctx);
           handleItems(el, scopeObj, ctx);
-        } else boundaries[plan.boundary](pass, el, plan, scopeObj, ctx);
+        } else if (plan.waits) {
+          waiting.add(plan.waits);
+        } else {
+          const enter = boundaries2[plan.boundary];
+          if (enter) enter(pass, el, plan, scopeObj, ctx);
+          else if (plan.wants) want(plan.wants, el);
+        }
         return;
       }
       if (!ctx.projection && !ctx.view && plan.bind != null) readBindInto(el, plan, ctx);
@@ -1603,7 +1801,7 @@ ${src}` : `"use strict"; return (${src});`;
         return rowObj;
       }
       const outer = recording;
-      const rec = { plan: rp, obj: rowObj, fields: null, presence: NONE, pending: NONE, collects: [], pure: true };
+      const rec = { plan: rp, obj: rowObj, fields: null, presence: NONE2, pending: NONE2, collects: [], pure: true };
       const p0 = pending.length;
       const e0 = app.diag.errors.length;
       recording = rec;
@@ -1620,10 +1818,10 @@ ${src}` : `"use strict"; return (${src});`;
         fields.push(k, v);
       }
       if (rp.decls) {
-        for (const d of rp.decls) if (isPresenceDecl(rowEl, d)) (rec.presence === NONE ? rec.presence = [] : rec.presence).push(d.name, d.attr);
+        for (const d of rp.decls) if (isPresenceDecl(rowEl, d)) (rec.presence === NONE2 ? rec.presence = [] : rec.presence).push(d.name, d.attr);
       }
       if (pending.length > p0) rec.pending = pending.slice(p0);
-      if (!rec.collects.length) rec.collects = NONE;
+      if (!rec.collects.length) rec.collects = NONE2;
       rec.fields = fields;
       keepRow(rowEl, rec);
       return rowObj;
@@ -1658,7 +1856,12 @@ ${src}` : `"use strict"; return (${src});`;
       stats: { calcs: 0, lists: 0 },
       resolveDefault,
       collectEl,
-      walkScope
+      walkScope,
+      changes,
+      full: changes === null,
+      trigger: opts.cause || opts.trigger || "refresh",
+      waiting,
+      wanted
     };
     for (const f of features) if (f.begin) f.begin(pass);
     const reads = opts.cacheReads === false ? null : beginReads(root);
@@ -1667,7 +1870,8 @@ ${src}` : `"use strict"; return (${src});`;
     } finally {
       if (opts.cacheReads !== false) endReads(reads);
     }
-    if (app.halted) return;
+    if (app.halted) return pass;
+    if (waiting.size) return pass;
     for (const f of features) if (f.afterIntake) f.afterIntake(pass);
     if (pending.length && whenFields.size) {
       for (const w of pending) {
@@ -1701,14 +1905,11 @@ ${src}` : `"use strict"; return (${src});`;
     if (app._debug) {
       console.log(`sap pass \xB7 trigger: ${app._lastPass.trigger} \xB7 writes ${writes}/${paints.length}`);
     }
+    return pass;
   }
   function paintAttrName(def) {
-    if (def.kind === "text") return def.fmt ? "text:" + def.fmt : "text";
-    if (def.kind === "attr") return "attr:" + def.arg;
-    if (def.kind === "class") return "class:" + def.arg;
-    if (def.kind === "css") return "css:" + def.arg;
-    if (def.kind === "when") return (def.match === "hide" ? "hide-when:" : def.match === "show-not" ? "option-not:" : "show-when:") + def.field;
-    return def.kind;
+    const tail = def.kind === "text" ? def.fmt || null : def.arg;
+    return tail == null ? def.kind : def.kind + ":" + tail;
   }
   function nearestMode(el, field, values2, notMode) {
     let cur = el;
@@ -1772,12 +1973,8 @@ ${src}` : `"use strict"; return (${src});`;
           }
           return 0;
         }
-        let visible;
-        if (def.match === "hide") visible = !nearestMode(el, def.field, def.values, false);
-        else if (def.match === "show-not") visible = nearestMode(el, def.field, def.values, true);
-        else visible = nearestMode(el, def.field, def.values, false);
         el._sapWhen = true;
-        const hide = !visible;
+        const hide = nearestMode(el, def.field, def.values, def.match === "show-not") === (def.match === "hide");
         if (el.hidden !== hide) {
           el.hidden = hide;
           return 1;
@@ -1898,6 +2095,7 @@ ${src}` : `"use strict"; return (${src});`;
         return;
       }
       visit(el);
+      if (closedBoundary(el)) return;
       for (let c = el.firstElementChild; c; c = c.nextElementSibling) descend(c);
     }
   }
@@ -1907,11 +2105,9 @@ ${src}` : `"use strict"; return (${src});`;
       diag.error(code, el, info);
       halted = true;
     };
-    const tw = root.ownerDocument.createTreeWalker(
-      root,
-      4
-      /* NodeFilter.SHOW_TEXT */
-    );
+    const tw = root.ownerDocument.createTreeWalker(root, 5, {
+      acceptNode: (n2) => n2.nodeType === 3 ? 1 : closedBoundary(n2) || n2.hasAttribute("bind") || n2.hasAttribute("sap-ignore") ? 2 : 3
+    });
     let node;
     while (node = tw.nextNode()) {
       if (/\{\{.*\}\}/.test(node.nodeValue || "")) {
@@ -1931,7 +2127,7 @@ ${src}` : `"use strict"; return (${src});`;
         if (claimed.has(name)) continue;
         if (name.includes(":")) {
           const prefix = name.slice(0, name.indexOf(":"));
-          if (!COLON_PREFIXES.has(prefix)) {
+          if (!COLON_PREFIXES.has(prefix) && !declaredAttr(name)) {
             const dym = didYouMean(prefix, [...COLON_PREFIXES]);
             diag.warn("W03", el, {
               attr: name,
@@ -1947,7 +2143,7 @@ ${src}` : `"use strict"; return (${src});`;
               fix: `use show="${a.value}" for an expression, or a literal like ${prefix}:${field}="overview"`
             });
           }
-        } else if (!KNOWN_BARE.has(name) && !HTML_GLOBALS.has(name) && !NATIVE_BOOLEAN_SET3.has(name) && !/^(data-|aria-|on)/.test(name) && !(name in el)) {
+        } else if (!KNOWN_BARE.has(name) && !declaredAttr(name) && !HTML_GLOBALS.has(name) && !NATIVE_BOOLEAN_SET3.has(name) && !/^(data-|aria-|on)/.test(name) && !(name in el)) {
           const dym = didYouMean(name, [...KNOWN_BARE]);
           if (dym) {
             diag.warn("W03", el, { attr: name, problem: `unknown "${name}" attribute`, didYouMean: dym });
@@ -2101,7 +2297,9 @@ ${src}` : `"use strict"; return (${src});`;
       return appRec;
     }
     injectStyles(root.ownerDocument);
-    for (const ta of root.querySelectorAll("textarea[data-value]")) rehydrateControlFromAttributes(ta);
+    for (const ta of root.querySelectorAll("textarea[data-value]")) {
+      if (!insideClosedBoundary(ta)) rehydrateControlFromAttributes(ta);
+    }
     const t0 = now();
     runPass(appRec, { trigger: "mount", full: true });
     appRec._mountMs = now() - t0;
@@ -2120,18 +2318,13 @@ ${src}` : `"use strict"; return (${src});`;
   function rootLabel(root) {
     return `${root.tagName.toLowerCase()}[sap]`;
   }
-  function countActions(root) {
-    let n2 = 0;
-    for (const el of root.querySelectorAll("*")) {
-      for (const a of el.attributes) if (ACTION_RE.test(a.name)) {
-        n2++;
-        break;
-      }
-    }
-    for (const a of root.attributes) if (ACTION_RE.test(a.name)) {
-      n2++;
-      break;
-    }
+  function countMarkup(root) {
+    const n2 = { actions: 0, lists: 0, rows: 0 };
+    walkVisible(root, (el) => {
+      if (el.hasAttribute("items")) n2.lists++;
+      if (el !== root && el.hasAttribute("item") && !el.hasAttribute("template")) n2.rows++;
+      if ([...el.attributes].some((a) => ACTION_RE.test(a.name))) n2.actions++;
+    });
     return n2;
   }
   function createDebug(runtime2) {
@@ -2143,9 +2336,7 @@ ${src}` : `"use strict"; return (${src});`;
         fields: s.fields || 0,
         calcs: s.calcs || 0,
         paints: s.paints || 0,
-        actions: countActions(root),
-        lists: (root.hasAttribute("items") ? 1 : 0) + root.querySelectorAll("[items]").length,
-        rows: root.querySelectorAll("[item]:not([template])").length,
+        ...countMarkup(root),
         warnings: app.diag.warnings.length,
         errors: app.diag.errors.length,
         mountWrites: app._mountWrites || 0,
@@ -2166,13 +2357,6 @@ ${src}` : `"use strict"; return (${src});`;
       }
       return `sap \u2713 ${v.root} \xB7 fields ${v.fields} \xB7 calcs ${v.calcs} \xB7 paints ${v.paints} \xB7 actions ${v.actions} \xB7 lists ${v.lists} \xB7 rows ${v.rows} \xB7 warnings ${v.warnings} \xB7 mount writes ${v.mountWrites} \xB7 ${v.ms}ms`;
     }
-    function printGreenLines() {
-      for (const app of runtime2.apps()) {
-        const line = greenLine(app);
-        if (app.diag.errors.length || app.halted) console.error(line);
-        else console.log(line);
-      }
-    }
     function report() {
       const errors = [];
       const warnings = [];
@@ -2188,11 +2372,267 @@ ${src}` : `"use strict"; return (${src});`;
       console.log(`sap debug ${on ? "on" : "off"} \u2014 per-pass headers will ${on ? "" : "no longer "}log`);
       return on;
     }
-    return { status, report, debug, greenLine, printGreenLines, REGISTRY };
+    return { status, report, debug, greenLine };
   }
 
   // src/version.js
   var VERSION = "0.8.0";
+
+  // src/plugin-manifest.js
+  var PLUGIN_API = 1;
+  var MANIFEST = {};
+
+  // src/plugins.js
+  var CDN = /^(https:\/\/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com)\/@panphora\/sapjs)(?=[@/]|$)/;
+  var wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  var listed = (root) => root.getAttribute("plugins")?.match(/\S+/g) || [];
+  function createPlugins(runtime2, Sap2, scheduler) {
+    const known = /* @__PURE__ */ new Map();
+    const installed2 = /* @__PURE__ */ new Map();
+    const loading = /* @__PURE__ */ new Map();
+    const failed = /* @__PURE__ */ new Map();
+    const blocked = [];
+    const marked = /* @__PURE__ */ new Set();
+    const helpers = {};
+    let off = false;
+    const w = globalThis;
+    const shared = Array.isArray(w.sapPlugins) ? w.sapPlugins : w.sapPlugins == null ? w.sapPlugins = [] : [];
+    const src = w.document?.currentScript?.src || "";
+    const cdn = CDN.exec(src);
+    const apiOf = (name) => installed2.get(name)?.api || null;
+    const settle = (names) => Promise.allSettled(names.map(load));
+    function refresh() {
+      const pending = /* @__PURE__ */ new Map();
+      for (const facts of known.values()) {
+        if (!installed2.has(facts.name)) for (const h of facts.helpers || []) pending.set(h, facts.name);
+      }
+      setHelpers(helpers, pending);
+      dropPlans();
+    }
+    function learn(facts) {
+      known.set(facts.name, { ...known.get(facts.name), ...facts });
+      declareFacts(facts);
+      refresh();
+    }
+    function declare(facts) {
+      if (!known.has(facts.name)) learn(facts);
+    }
+    function publish(def) {
+      if (!shared.includes(def)) shared.push(def);
+      learn(def);
+    }
+    function wake(trigger) {
+      for (const app of runtime2.apps()) if (app.root.isConnected) runtime2.schedule(app, trigger);
+    }
+    const kit = Object.freeze({
+      api: PLUGIN_API,
+      version: VERSION,
+      compile,
+      run,
+      runWith,
+      planOf,
+      drainPlans,
+      forgetRow,
+      setBeacon,
+      clearBeacon,
+      write: withDomMutationPaused,
+      schedule(target, trigger = "plugin") {
+        const app = target?.root ? target : runtime2.appFor(target);
+        if (app) runtime2.schedule(app, trigger);
+      },
+      appFor: runtime2.appFor,
+      apps: runtime2.apps,
+      capability,
+      mayWrite: mayWriteRecord,
+      load,
+      plugin: apiOf
+    });
+    function use(def) {
+      if (typeof def === "string") return load(def);
+      const { name, api: speaks } = def;
+      const refuse = (why) => {
+        throw new Error(`Sap.use: plugin "${name}" ${why}`);
+      };
+      if (typeof name !== "string" || speaks !== PLUGIN_API) refuse(`needs a name and plugin API ${PLUGIN_API}; it gives API ${speaks}`);
+      if (off) return null;
+      if (installed2.has(name)) return apiOf(name);
+      if ((def.requires || []).some((r) => !installed2.has(r))) {
+        publish(def);
+        if (!blocked.includes(def)) blocked.push(def);
+        return null;
+      }
+      const made = def.setup?.(kit) || {};
+      const check = (part, taken) => {
+        for (const n2 of Array.isArray(def[part]) ? def[part] : Object.keys(def[part] || {})) {
+          if (typeof (made[part] || {})[n2] !== "function" || taken(n2)) refuse(`cannot add "${n2}" to ${part}: the name is taken or not valid, or setup does not supply it`);
+        }
+      };
+      const claimed = (n2) => !claimable(n2, name);
+      check("helpers", (n2) => {
+        if (isGlobal(n2)) refuse(`cannot add "${n2}": window.${n2} exists; rename the helper`);
+        return !isHelperName(n2) || n2 in helpers;
+      });
+      check("boundaries", claimed);
+      check("directives", claimed);
+      for (const k in made.api) if (k in Sap2) refuse(`cannot add Sap.${k}: the name is taken`);
+      publish(def);
+      const feature = { ...made, name, order: def.order, boundary: {} };
+      for (const n2 in def.boundaries) feature.boundary[n2] = made.boundaries[n2];
+      for (const h of def.helpers || []) helpers[h] = made.helpers[h];
+      for (const k in made.formats) if (!(k in formats)) formats[k] = made.formats[k];
+      registerFeature(feature);
+      if (made.lint) addLintCheck(made.lint);
+      Object.assign(Sap2, made.api);
+      installed2.set(name, feature);
+      failed.delete(name);
+      setInstalled(name, made.directives || true);
+      refresh();
+      withDomMutationPaused(() => marked.forEach(clearBeacon));
+      marked.clear();
+      blocked.splice(0).forEach(tryUse);
+      wake("plugin:" + name);
+      return apiOf(name);
+    }
+    function tryUse(def) {
+      try {
+        use(def);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    function fetchOnce(name) {
+      if (off || installed2.has(name)) return null;
+      const facts = known.get(name) || {};
+      const custom = api.loader?.(name, facts);
+      const url = facts.url || api.base && api.base + (facts.file || name) + ".js";
+      const got = custom !== void 0 ? Promise.resolve(custom) : new Promise((resolve, reject) => {
+        if (!url) throw new Error(`no address for plugin "${name}": call Sap.use(definition)`);
+        const s = document.createElement("script");
+        s.src = url;
+        s.setAttribute("clay", "editor-ui");
+        s.onload = s.onerror = (e) => {
+          s.remove();
+          if (e.type === "load") resolve();
+          else reject(new Error("could not load " + url));
+        };
+        document.head.append(s);
+      });
+      return got.then((mod) => {
+        if (off) return;
+        const def = mod?.default || mod || shared.find((d) => d.name === name);
+        if (def?.name) use(def);
+        if (!installed2.has(name)) throw new Error(`plugin "${name}" loaded and did not register`);
+      });
+    }
+    function load(name) {
+      if (installed2.has(name)) return Promise.resolve(apiOf(name));
+      if (loading.has(name)) return loading.get(name);
+      failed.delete(name);
+      let attempt = Promise.all((known.get(name)?.requires || []).map(load)).then(() => fetchOnce(name));
+      for (const ms of api.retryDelays) attempt = attempt.catch(() => wait(ms).then(() => fetchOnce(name)));
+      const p = attempt.finally(() => loading.delete(name)).then(
+        () => apiOf(name),
+        (error) => {
+          failed.set(name, error);
+          wake("plugin-failed:" + name);
+          document.dispatchEvent(new CustomEvent("sap:plugin-failed", { detail: { plugin: name, error } }));
+          throw error;
+        }
+      );
+      loading.set(name, p);
+      return p;
+    }
+    function needed(docRoot) {
+      const found = /* @__PURE__ */ new Set();
+      for (const el of docRoot.closest?.("[sap]") ? [docRoot] : docRoot.querySelectorAll("[sap]")) {
+        for (const n2 of listed(el.closest("[sap]"))) found.add(n2);
+        if (known.size > installed2.size) {
+          walkVisible(el, (at) => {
+            const plan = planOf(at);
+            if (plan.inert) return false;
+            plan.wants?.map((n2) => found.add(n2));
+            return !!found.add(plan.waits);
+          });
+        }
+      }
+      return [...found].filter((n2) => n2 && !installed2.has(n2));
+    }
+    setPassHost((app, pass) => {
+      for (const name of /* @__PURE__ */ new Set([...pass.wanted.keys(), ...pass.waiting, ...listed(app.root)])) {
+        if (installed2.has(name)) continue;
+        const error = failed.get(name);
+        if (!error) load(name).catch(() => {
+        });
+        else {
+          const at = pass.wanted.get(name)?.[0] || app.root;
+          app.diag.error("E52", at, {
+            problem: `the "${name}" plugin did not load: ${error.message}`,
+            fix: "Sap.plugins.retry() tries again"
+          });
+          marked.add(at);
+          withDomMutationPaused(() => setBeacon(at, "E52"));
+        }
+      }
+    });
+    const api = {
+      api: PLUGIN_API,
+      // The folder that holds plugin files. An address on a CDN is pinned to this engine's
+      // own version, so the engine and a plugin never come from two releases.
+      // An address has a folder when a slash follows its scheme. A data:, blob: or about:
+      // address has none.
+      base: cdn ? `${cdn[1]}@${VERSION}/dist/sap-plugins/` : /^[^:]+:\//.test(src) ? new URL("sap-plugins/", src).href : null,
+      // Optional (name, facts) => a promise of a module or a definition. When it returns
+      // undefined the plugin loads from a script tag.
+      loader: null,
+      retryDelays: [1e3, 4e3],
+      declare,
+      load,
+      // Null when the document asks for nothing that is missing. Otherwise a promise that
+      // resolves once each of those plugins has installed or failed, and each plugin that
+      // shows only then, or after timeoutMs. A plugin is asked for once in a call.
+      ready(docRoot = document, timeoutMs = 3e3) {
+        const tried = /* @__PURE__ */ new Set();
+        const more = () => {
+          const asked = needed(docRoot).filter((n2) => !tried.has(n2) && tried.add(n2));
+          return asked.length && settle(asked).then(more);
+        };
+        const all = more();
+        return all ? Promise.race([all, wait(timeoutMs)]) : null;
+      },
+      has: (name) => installed2.has(name),
+      status: () => ({ installed: [...installed2.keys()], loading: [...loading.keys()], failed: [...failed.keys()] }),
+      retry: (name) => settle(name ? [name] : [...failed.keys()])
+    };
+    function flush() {
+      const pending = [];
+      const passes = () => {
+        flushMutationBridge();
+        return scheduler.flushNow();
+      };
+      const hooks = [...installed2.values()].filter((plugin) => plugin.flush);
+      passes();
+      for (let round = 0; hooks.length && round < 8; round++) {
+        for (const plugin of hooks) {
+          const r = plugin.flush();
+          if (r?.then) pending.push(r);
+        }
+        if (!passes()) break;
+      }
+      return pending.length ? Promise.all(pending).then(flush) : null;
+    }
+    Sap2.use = use;
+    Sap2.plugins = api;
+    Sap2.flush = flush;
+    for (const facts of Object.values(MANIFEST)) declare(facts);
+    shared.slice().forEach(tryUse);
+    w.addEventListener?.("online", () => api.retry());
+    return function dispose() {
+      off = true;
+      for (const plugin of installed2.values()) plugin.dispose?.();
+      installed2.clear();
+      failed.clear();
+    };
+  }
 
   // src/runtime.js
   function createSap({ createAccessor: createAccessor2, installInput, debugExtras }) {
@@ -2245,7 +2685,7 @@ ${src}` : `"use strict"; return (${src});`;
       appFor,
       isRegistered: (el) => registry.has(el),
       pruneDisconnected,
-      schedule: (app, trigger) => scheduler.schedule(app, trigger),
+      schedule: scheduler.schedule,
       runNow: (app, trigger) => scheduler.runNow(app, trigger),
       moveInto,
       placeBefore,
@@ -2274,7 +2714,7 @@ ${src}` : `"use strict"; return (${src});`;
       const roots = docRoot.querySelectorAll("[sap]");
       const fresh = [];
       for (const root of roots) {
-        if (registry.has(root)) continue;
+        if (registry.has(root) || insideClosedBoundary(root)) continue;
         const appRec = mountApp(root);
         registry.set(root, appRec);
         order.push(appRec);
@@ -2307,7 +2747,7 @@ ${src}` : `"use strict"; return (${src});`;
     const Sap2 = accessor.Sap;
     Sap2.version = VERSION;
     Sap2.refresh = function refresh() {
-      for (const app of order) if (app.root.isConnected) scheduler.runNow(app, "refresh");
+      for (const app of order.slice()) if (app.root.isConnected) scheduler.runNow(app, "refresh");
     };
     Sap2.batch = batch;
     Sap2.status = debugApi.status;
@@ -2337,7 +2777,9 @@ ${src}` : `"use strict"; return (${src});`;
       order.length = 0;
       resetMutationBridge();
       if (typeof teardownBridges === "function") teardownBridges();
+      disposePlugins();
     };
+    const disposePlugins = createPlugins(runtime2, Sap2, scheduler);
     return { Sap: Sap2, mountAll: mountAll2, mount: mount2, runtime: runtime2 };
   }
   function autoMount(mountAll2) {
@@ -3188,6 +3630,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var detailFeature = {
     name: "detail",
+    order: 10,
     begin(pass) {
       pass.deferredDetails = [];
     },
@@ -3220,6 +3663,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var calcFeature = {
     name: "calc",
+    order: 20,
     begin(pass) {
       pass.calcs = [];
     },
@@ -3370,6 +3814,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var eachFeature = {
     name: "each",
+    order: 30,
     begin(pass) {
       pass.eachList = [];
     },
@@ -3399,6 +3844,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var effectFeature = {
     name: "effect",
+    order: 40,
     begin(pass) {
       pass.effects = [];
     },
@@ -3424,6 +3870,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var validationFeature = {
     name: "validation",
+    order: 50,
     begin(pass) {
       pass.invalids = [];
     },
@@ -3456,6 +3903,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
   var projectionFeature = {
     name: "projection",
+    order: 60,
     collect(pass, el, plan, ctx) {
       if (!(plan.bind != null && (ctx.view || ctx.projection) && !isComposer(el))) return false;
       const field = plan.bind;

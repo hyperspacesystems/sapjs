@@ -354,8 +354,43 @@ sap ✓ main[sap] · fields 12 · calcs 4 · paints 18 · actions 6 · lists 2 �
 | `E26` | recompute circuit breaker tripped |
 | `E31` | `bind` on a password without `transient` |
 | `E40`–`E43` | `each`: not an array, a missing or duplicate key, a bad template, `bind` inside a row |
+| `E52` | a plugin did not load; the element that asked for it keeps its saved content |
 
 Errors that contradict the file's structure halt the app at mount (no listeners arm, the file stays byte-frozen). Everything else degrades per element.
+
+---
+
+## Plugins
+
+A plugin adds to the engine without changing it: a boundary the engine stays out of, a directive, an expression helper, a format, or an API on `Sap`. A plugin is one plain object. Its static fields say what it claims, and `setup(kit)` returns its hooks.
+
+```js
+Sap.use({
+  name: "stamp",
+  api: 1,
+  helpers: ["stamp"],
+  setup: (kit) => ({ helpers: { stamp: (v) => `[${v}]` } }),
+});
+```
+
+```html
+<output text="stamp(state.note)"></output>
+```
+
+- **`Sap.use(definition)`** installs a plugin now and returns its API object, or `null` when the plugin has none. It is safe to call at any time and twice. `Sap.use("name")` loads a plugin by name and returns a promise.
+- **`Sap.use` throws when it refuses a definition**, and the message names the plugin and the reason: another `api` number, a name that is taken or not valid, a declared name that `setup` does not supply, or an error from `setup` itself. When a helper is refused because the page has a global of the same name, the message names that global: `cannot add "range": window.range exists; rename the helper`. A refused definition leaves nothing behind: no attribute, no helper name, and no entry in `window.sapPlugins`. What `Sap.plugins.declare` said about the plugin earlier stays. The same definition can be given again.
+- **A definition that lists other plugins in `requires` waits for them.** `Sap.use` returns `null` and declares what the definition claims, so the engine stays out of its boundaries while it waits. It installs when the last plugin it requires installs. If it is refused then, the error goes to the console and the page reports `E52` where it asks for the plugin.
+- **Attribute names.** The first plugin to declare a boundary or a directive keeps that name. `sap`, `item`, `scope`, `items`, `detail` and `each` are the engine's own, and no plugin can take one.
+- **A helper sits outside the 13 frozen arguments.** Its name is a plain name that a function can take as a parameter. A plugin cannot take one of the 13 names, a reserved word such as `default` or `class`, or a name the browser or the page already has as a global, such as `Number` or `Math`. An element the browser lists under its `id` is not such a global. A page global with the name of a helper that has not loaded stays the page's, also when the page defines it after the plugin was declared. When the page defines it after an app that calls it has mounted, `Sap.refresh()` ends that app's wait. A helper's name inside a string literal, or in the text of a template literal, is not a call.
+- **A plugin file is a classic script that registers itself.** A `<script src="sap-plugins/name.js">` tag works before or after the engine's tag, and a file that runs twice registers once. `node build/plugin.mjs <entry> <outfile>` builds one from a module whose default export is the definition.
+- **A plugin can load on demand.** Declare what it claims first, in a head script: `Sap.plugins.declare({ name, url, boundaries, helpers })`. Until the file has loaded, the engine leaves the plugin's boundaries exactly as saved, and an app whose expression calls one of its helpers waits and keeps its saved values. `<main sap plugins="a b">` asks for plugins that nothing in the markup reveals.
+- **Where a file is found.** `Sap.plugins.loader(name, facts)` when a host set it, then the declared `url`, then `Sap.plugins.base` plus the name and `.js`. The base defaults to `sap-plugins/` beside the engine's own script, when that script's address has a folder: `https:`, `file:`, and app addresses such as `capacitor:`, `tauri:` and `chrome-extension:`. On jsdelivr and unpkg it is pinned to the engine's version. An engine at a `data:`, `blob:` or `about:` address has no base: set `Sap.plugins.base`, declare a `url`, or pass the definition to `Sap.use`.
+- **When a load fails** the engine tries again after 1 second and after 4 more. Then the boundary keeps its saved content, `document` receives a `sap:plugin-failed` event, and every pass reports `E52` on the element that asked. `Sap.plugins.retry()` tries again, and so does the browser's `online` event.
+- **`Sap.plugins.ready(document)`** returns `null` when the document asks for nothing that is missing. Otherwise it returns a promise that resolves when those plugins have installed or failed, or after 3 seconds. It takes a document, an app root, or an element inside an app. It counts what a pass would meet there: a boundary attribute, a directive, and a call to a declared helper in an expression. It also counts the `plugins=` list of each app root there, and of the root that an element inside an app belongs to. An element names one missing plugin at a time (two helpers in one expression, two plugin directives on one element), so when a plugin installs `ready` looks again and waits for the next one too.
+- **What a plugin paints** is plain data in the definition: `ownership: [{ within: "table[grid]", select: "td[f]", text: true }, { within: "table[grid]", select: "td", attrs: ["n"] }]`. `within` selects the plugin's boundary and `select` the elements under it. `src/ownership.js` reads these rules with no engine loaded, so a host such as ClayJS leaves that output out of its dirty check and undo. Under a boundary nothing else counts as painted, except the engine's error marker.
+- **`Sap.flush()`** settles what is queued, in the current task: DOM changes the browser has not delivered, queued passes, and each plugin's pending work. It returns `null`, or a promise when a plugin could not finish in the same task. A host calls it before it reads the page for a save.
+
+sapjs ships no plugin of its own yet.
 
 ---
 
@@ -371,7 +406,7 @@ Sap runs standalone in any HTML file. When `window.hyperclay` is present it ride
 - with ClayJS (`window.clay`), ClayJS mounts Sap in a boot phase after `clay="freeze"` regions record their authored markup and visitor drafts restore, then settles its boot baseline on the painted page; without that phase Sap mounts once `clay.ready` settles,
 - ClayJS treats painted output as derived (`clay.derived`): comparisons, the dirty check, undo and merges leave it out, and Sap repaints right after every merge, before ClayJS records a baseline. Ownership is read by `src/ownership.js`, which ClayJS vendors.
 
-**The core build.** `dist/sap-core.min.js` (about 40 KB minified, 14 KB gzipped, against 64 KB and 22 KB for `dist/sap.min.js`) is the same source with records and paints only. ClayJS loads it by itself on any page with a `[sap]` root. `calc:`, `each`, `detail`, `effect`, `invalid`, the actions and `Sap(el)` halt with `E50` naming full sapjs, and loading `sap.js` takes the page over with no markup change. `Sap.why` and `Sap.doctor` are full-only.
+**The core build.** `dist/sap-core.min.js` (about 53 KB minified, 19 KB gzipped, against 77 KB and 27 KB for `dist/sap.min.js`) is the same source with records and paints only. ClayJS loads it by itself on any page with a `[sap]` root. `calc:`, `each`, `detail`, `effect`, `invalid`, the actions and `Sap(el)` halt with `E50` naming full sapjs, and loading `sap.js` takes the page over with no markup change. `Sap.why` and `Sap.doctor` are full-only.
 
 **Where paints live in a malleable file.** A paint computed only from the records (a count, a total, a card's badge) is ordinary saved content: author the file pre-painted, and under ClayJS a merge leaves painted values out and Sap repaints them from the merged records, so two tabs never conflict over a total. A paint that differs per tab (today's date, the locale, the URL, the search box, runtime-loaded data) belongs in a `clay="freeze"` scratchpad: ClayJS saves and syncs the element but never its contents, and a scratchpad that arrives from a peer is empty. Fill it from an `effect` on the scratchpad, which runs on every pass:
 

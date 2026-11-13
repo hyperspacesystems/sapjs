@@ -75,6 +75,18 @@ describe("legacy option: / option-not: aliases work in sapjs", () => {
   });
 });
 
+describe("each verb with the field matching, not matching, and absent", () => {
+  test.each([
+    ["show-when", "a", false], ["show-when", "b", true], ["show-when", null, true],
+    ["option", "a", false], ["option", "b", true], ["option", null, true],
+    ["hide-when", "a", true], ["hide-when", "b", false], ["hide-when", null, false],
+    ["option-not", "a", true], ["option-not", "b", false], ["option-not", null, true],
+  ])('%s:mode="a" where mode is %s: hidden is %s', (verb, mode, isHidden) => {
+    const root = mount(`<main sap><div ${mode == null ? "" : `mode="${mode}"`}><section id="s" ${verb}:mode="a">x</section></div></main>`);
+    expect(hidden(root, "s")).toBe(isHidden);
+  });
+});
+
 describe("pipe OR", () => {
   test("show-when matches any of the piped values", () => {
     const root = mount(`

@@ -30,6 +30,7 @@ export const REGISTRY = {
   E42: { slug: "each-template", behavior: "ERR" },
   E43: { slug: "bind-in-each-row", behavior: "ERR" },
   E50: { slug: "needs-full-sapjs", behavior: "HALT" },
+  E52: { slug: "plugin-not-loaded", behavior: "ERR" },
   W03: { slug: "unknown-colon-attribute", behavior: "WARN" },
   W04: { slug: "expression-in-when", behavior: "WARN" },
   W30: { slug: "nonzero-mount-writes", behavior: "WARN" },
@@ -135,17 +136,6 @@ export class Diagnostics {
     const rec = this.block(code, el, info);
     this.warnings.push(rec);
     return rec;
-  }
-
-  report() {
-    return {
-      ok: this.errors.length === 0 && !this.halted,
-      app: this.appName,
-      halted: this.halted,
-      haltReason: this.haltReason,
-      errors: this.errors.slice(),
-      warnings: this.warnings.slice(),
-    };
   }
 }
 

@@ -15,7 +15,8 @@
 // built fresh on every read. Without a MutationObserver nothing is cached.
 
 import { parseStateDecl } from "./dom.js";
-import { compile } from "./compile.js";
+import { compile, waitsFor } from "./compile.js";
+import { boundaryOf, closedOwner, directiveFor, walkVisible } from "./registry.js";
 
 let planGen = {};
 let watcher = null;
@@ -56,16 +57,17 @@ function watchPlans() {
 function clearFromRecords(records) {
   for (const rec of records) {
     if (rec.type === "attributes") {
-      if (rec.target._sapPlan) rec.target._sapPlan = null;
-    } else {
-      for (const node of rec.addedNodes) if (node.nodeType === 1) clearTree(node);
+      clearPlan(rec.target);
+    } else if (rec.addedNodes.length && !(rec.target.nodeType === 1 && closedOwner(rec.target))) {
+      for (const node of rec.addedNodes) if (node.nodeType === 1) walkVisible(node, clearPlan);
     }
   }
 }
 
-function clearTree(el) {
+// No plan is built inside a closed plugin boundary, so the walk that clears an inserted
+// subtree stays out of one.
+function clearPlan(el) {
   if (el._sapPlan) el._sapPlan = null;
-  for (let c = el.firstElementChild; c; c = c.nextElementSibling) clearTree(c);
 }
 
 export function planOf(el) {
@@ -73,6 +75,15 @@ export function planOf(el) {
   const p = el._sapPlan;
   if (p && p.gen === planGen) return p;
   return (el._sapPlan = buildPlan(el));
+}
+
+// Compiles one of a plan's expressions. An expression that calls a helper of a plugin
+// that has not installed makes the plan wait for that plugin. each= and detail= run
+// theirs while the walk is inside them, so buildPlan reads those from the attribute.
+function expr(plan, src, statement) {
+  const entry = compile(src, statement);
+  if (entry.waits) plan.waits = entry.waits;
+  return entry;
 }
 
 function buildPlan(el) {
@@ -91,6 +102,10 @@ function buildPlan(el) {
     paints: null,
     effects: null,
     invalids: null,
+    waits: null,
+    wants: null,
+    ext: false,
+    impure: false,
   };
   for (const attr of el.attributes) {
     const name = attr.name;
@@ -104,33 +119,54 @@ function buildPlan(el) {
         case "item": plan.item = true; break;
         case "scope": plan.scope = true; break;
         case "items": plan.items = true; break;
-        case "detail": plan.detail = true; break;
-        case "each": plan.each = true; break;
+        case "detail": plan.detail = true; plan.waits = waitsFor(val) || plan.waits; break;
+        case "each": plan.each = true; plan.waits = waitsFor(val) || waitsFor(el.getAttribute("key")) || plan.waits; break;
         case "bind": plan.bind = val; break;
         case "transient": plan.transient = true; break;
         case "state": plan.decls = parseStateDecl(val); break;
-        case "text": (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: null, entry: compile(val) }); break;
-        case "show": (plan.paints || (plan.paints = [])).push({ kind: "show", entry: compile(val) }); break;
-        case "effect": (plan.effects || (plan.effects = [])).push({ entry: compile(val, true) }); break;
-        case "invalid": (plan.invalids || (plan.invalids = [])).push({ entry: compile(val) }); break;
+        case "text": (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: null, entry: expr(plan, val) }); break;
+        case "show": (plan.paints || (plan.paints = [])).push({ kind: "show", entry: expr(plan, val) }); break;
+        case "effect": (plan.effects || (plan.effects = [])).push({ entry: expr(plan, val, true) }); break;
+        case "invalid": (plan.invalids || (plan.invalids = [])).push({ entry: expr(plan, val) }); break;
+        default: pluginDirective(plan, name, "", val);
       }
       continue;
     }
     const head = name.slice(0, colon);
     const tail = name.slice(colon + 1);
     switch (head) {
-      case "calc": (plan.calcs || (plan.calcs = [])).push({ name: tail, entry: compile(val) }); break;
-      case "text": (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: tail, entry: compile(val) }); break;
-      case "attr": (plan.paints || (plan.paints = [])).push({ kind: "attr", arg: tail, entry: compile(val) }); break;
-      case "class": (plan.paints || (plan.paints = [])).push({ kind: "class", arg: tail, entry: compile(val) }); break;
-      case "css": (plan.paints || (plan.paints = [])).push({ kind: "css", arg: tail, entry: compile(val) }); break;
+      case "calc": (plan.calcs || (plan.calcs = [])).push({ name: tail, entry: expr(plan, val) }); break;
+      case "text": (plan.paints || (plan.paints = [])).push({ kind: "text", fmt: tail, entry: expr(plan, val) }); break;
+      case "attr": (plan.paints || (plan.paints = [])).push({ kind: "attr", arg: tail, entry: expr(plan, val) }); break;
+      case "class": (plan.paints || (plan.paints = [])).push({ kind: "class", arg: tail, entry: expr(plan, val) }); break;
+      case "css": (plan.paints || (plan.paints = [])).push({ kind: "css", arg: tail, entry: expr(plan, val) }); break;
       case "show-when": case "option": (plan.paints || (plan.paints = [])).push({ kind: "when", match: "show", field: tail, values: val.split("|") }); break;
       case "hide-when": (plan.paints || (plan.paints = [])).push({ kind: "when", match: "hide", field: tail, values: val.split("|") }); break;
       case "option-not": (plan.paints || (plan.paints = [])).push({ kind: "when", match: "show-not", field: tail, values: val.split("|") }); break;
+      default: pluginDirective(plan, head + ":", tail, val);
     }
   }
-  plan.boundary = plan.scope ? "scope" : plan.items ? "items" : plan.detail ? "detail" : plan.each ? "each" : null;
+  const pluginBoundary = boundaryOf(el);
+  plan.boundary = plan.scope ? "scope" : plan.items ? "items" : plan.detail ? "detail" : plan.each ? "each" : pluginBoundary ? pluginBoundary.name : null;
+  if (pluginBoundary && !pluginBoundary.installed) (plan.wants ||= []).push(pluginBoundary.plugin);
   return isEmpty(plan) ? emptyPlan() : plan;
+}
+
+// An attribute a plugin declared as a directive. Its parsed result joins the list at
+// plan[key]. Until that plugin installs, the plan only records which plugin it asks for.
+function pluginDirective(plan, name, tail, val) {
+  const d = directiveFor(name);
+  if (!d) return;
+  if (!d.parse) {
+    (plan.wants ||= []).push(d.plugin);
+    return;
+  }
+  const def = d.parse(tail, val);
+  if (def === undefined) return;
+  (plan[d.key] || (plan[d.key] = [])).push(def);
+  plan.ext = true;
+  if (d.impure) plan.impure = true;
+  if (def && def.entry && def.entry.waits) plan.waits = def.entry.waits;
 }
 
 // Most elements carry no directive. They all share one frozen plan per generation
@@ -144,7 +180,8 @@ function emptyPlan() {
       inert: false, template: false, cms: false, item: false,
       scope: false, items: false, detail: false, each: false,
       boundary: null, bind: null, transient: false,
-      decls: null, calcs: null, paints: null, effects: null, invalids: null,
+      decls: null, calcs: null, paints: null, effects: null, invalids: null, waits: null,
+      wants: null, ext: false, impure: false,
     });
   }
   return empty;
@@ -152,5 +189,5 @@ function emptyPlan() {
 
 function isEmpty(plan) {
   return !plan.inert && !plan.item && plan.boundary === null && plan.bind === null && !plan.transient &&
-    !plan.decls && !plan.calcs && !plan.paints && !plan.effects && !plan.invalids;
+    !plan.decls && !plan.calcs && !plan.paints && !plan.effects && !plan.invalids && !plan.wants && !plan.ext;
 }

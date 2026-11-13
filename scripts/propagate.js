@@ -17,6 +17,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { buildSync } from 'esbuild'
+import { MANIFEST } from '../src/plugin-manifest.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
@@ -131,6 +132,35 @@ function buildOwnershipVendor() {
   return OWNERSHIP_HEADER + '\n' + fs.readFileSync(ownershipSrc, 'utf8').trim() + '\n'
 }
 
+// A first party plugin goes to clayjs twice. ClayJS's own loader imports the ES module
+// copy. A page that loads clayjs.com/v1/sap.js with no clay.js fetches the classic copy
+// from the sap-plugins/ folder beside that file, which clayjs publishes from
+// entries/sap-plugins/. The manifest names the plugins, so a plugin cannot ship in
+// sapjs and be missing from clayjs.
+const pluginHeader = source => `// GENERATED — do not edit. Vendored from sapjs/${source} via sapjs
+// \`npm run copy-to-clayjs\`. Edit the sapjs source and re-run.
+`
+
+function buildPluginEsm(file) {
+  const entry = path.join(rootDir, 'src', 'plugins', `${file}.js`)
+  const result = buildSync({ entryPoints: [entry], bundle: true, format: 'esm', minify: true, write: false, legalComments: 'none' })
+  return pluginHeader(`src/plugins/${file}.js`) + result.outputFiles[0].text
+}
+
+function buildPluginClassic(file) {
+  const built = path.join(rootDir, 'dist', 'sap-plugins', `${file}.js`)
+  if (!fs.existsSync(built)) {
+    console.error(`Error: dist/sap-plugins/${file}.js not found. Run "npm run build" first.`)
+    process.exit(1)
+  }
+  return pluginHeader(`dist/sap-plugins/${file}.js`) + fs.readFileSync(built, 'utf8').trim() + '\n'
+}
+
+const PLUGIN_DESTINATIONS = Object.values(MANIFEST).map(facts => facts.file || facts.name).flatMap(file => [
+  { client: 'clayjs', path: `clayjs/src/vendor/sap-${file}.vendor.js`, build: () => buildPluginEsm(file), needsDist: false },
+  { client: 'clayjs', path: `clayjs/entries/sap-plugins/${file}.js`, build: () => buildPluginClassic(file), ownFolder: true }
+])
+
 const DESTINATIONS = [
   { client: 'clayjs', path: 'clayjs/entries/sap.js', build: buildSapClassic },
   { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/sapjs.vendor.js', build: buildSapEsm },
@@ -138,7 +168,8 @@ const DESTINATIONS = [
   { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/control-serialize.vendor.js', build: buildSerializeVendor },
   { client: 'clayjs', path: 'clayjs/src/vendor/sap-core.vendor.js', build: buildSapCoreEsm },
   { client: 'clayjs', path: 'clayjs/src/vendor/sap-ownership.vendor.js', build: buildOwnershipVendor },
-  { client: 'hyper-html-api', path: 'hyper-html-api/src/codecs/sheet.vendor.js', build: buildCodecVendor, needsDist: false }
+  { client: 'hyper-html-api', path: 'hyper-html-api/src/codecs/sheet.vendor.js', build: buildCodecVendor, needsDist: false },
+  ...PLUGIN_DESTINATIONS
 ]
 
 const args = process.argv.slice(2)
@@ -180,20 +211,23 @@ if (isCheck) {
   process.exit(0)
 }
 
-const missing = targets.filter(
-  destination => !fs.existsSync(path.dirname(path.join(workspace, destination.path)))
-)
+// A destination with a folder of its own (`ownFolder`) creates that folder; the folder
+// above it must exist like any other destination's.
+const requiredFolder = destination => {
+  const folder = path.dirname(path.join(workspace, destination.path))
+  return destination.ownFolder ? path.dirname(folder) : folder
+}
+const missing = targets.filter(destination => !fs.existsSync(requiredFolder(destination)))
 if (missing.length) {
   missing.forEach(destination => {
-    console.error(
-      `Error: destination folder not found at ${path.dirname(path.join(workspace, destination.path))}`
-    )
+    console.error(`Error: destination folder not found at ${requiredFolder(destination)}`)
   })
   console.error(`Every destination is resolved against ${workspace}.`)
   process.exit(1)
 }
 
 targets.forEach(destination => {
+  if (destination.ownFolder) fs.mkdirSync(path.dirname(path.join(workspace, destination.path)), { recursive: true })
   fs.writeFileSync(path.join(workspace, destination.path), destination.build(), 'utf8')
   console.log(`✓ Updated ${destination.path}`)
 })

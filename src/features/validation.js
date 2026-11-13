@@ -15,6 +15,7 @@ function runInvalid(iv) {
 
 export const validationFeature = {
   name: "validation",
+  order: 50,
   begin(pass) {
     pass.invalids = [];
   },

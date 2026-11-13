@@ -4,6 +4,7 @@
 
 import { parseStateDecl, rowsOf, templateOf, sharedTemplate, isNativeBoolean } from "./dom.js";
 import { RESERVED, HTML_GLOBALS, NATIVE_BOOLEANS, didYouMean, setBeacon } from "./errors.js";
+import { closedBoundary, declaredAttr } from "./registry.js";
 
 const NATIVE_BOOLEAN_SET = new Set(NATIVE_BOOLEANS);
 // `editmode` and `viewmode` are platform prefixes (editmode:onclick etc.), not Sap
@@ -41,7 +42,8 @@ function isBound(el) {
 }
 
 // Walk every element under the app, skipping inert subtrees, calling visit(el).
-// A shared <template items> blueprint is checked through its content.
+// A shared <template items> blueprint is checked through its content. A closed plugin
+// boundary is checked as one element: what is inside belongs to its plugin.
 function walkAll(root, visit) {
   visit(root);
   for (let child = root.firstElementChild; child; child = child.nextElementSibling) descend(child);
@@ -52,6 +54,7 @@ function walkAll(root, visit) {
       return;
     }
     visit(el);
+    if (closedBoundary(el)) return;
     for (let c = el.firstElementChild; c; c = c.nextElementSibling) descend(c);
   }
 }
@@ -63,8 +66,14 @@ export function lintApp(root, diag) {
     halted = true;
   };
 
-  // moustaches in any text node
-  const tw = root.ownerDocument.createTreeWalker(root, 0x4 /* NodeFilter.SHOW_TEXT */);
+  // moustaches in text the engine could be asked to fill in. The filter answers 1
+  // (accept) for a text node, 3 (skip the node, keep its children) for an element, and
+  // 2 (reject the subtree) for an element whose text is never a template: a closed
+  // plugin boundary, a bound element (what a person typed into a record is content),
+  // and a sap-ignore subtree.
+  const tw = root.ownerDocument.createTreeWalker(root, 0x5 /* NodeFilter.SHOW_ELEMENT | SHOW_TEXT */, {
+    acceptNode: (n) => (n.nodeType === 3 ? 1 : closedBoundary(n) || n.hasAttribute("bind") || n.hasAttribute("sap-ignore") ? 2 : 3),
+  });
   let node;
   while ((node = tw.nextNode())) {
     if (/\{\{.*\}\}/.test(node.nodeValue || "")) {
@@ -88,7 +97,7 @@ export function lintApp(root, diag) {
       // colon-prefixed attribute checks
       if (name.includes(":")) {
         const prefix = name.slice(0, name.indexOf(":"));
-        if (!COLON_PREFIXES.has(prefix)) {
+        if (!COLON_PREFIXES.has(prefix) && !declaredAttr(name)) {
           const dym = didYouMean(prefix, [...COLON_PREFIXES]);
           diag.warn("W03", el, {
             attr: name,
@@ -105,6 +114,7 @@ export function lintApp(root, diag) {
         }
       } else if (
         !KNOWN_BARE.has(name) &&
+        !declaredAttr(name) &&
         !HTML_GLOBALS.has(name) &&
         !NATIVE_BOOLEAN_SET.has(name) &&
         !/^(data-|aria-|on)/.test(name) &&

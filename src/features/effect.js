@@ -15,6 +15,7 @@ function runEffect(e, app) {
 
 export const effectFeature = {
   name: "effect",
+  order: 40,
   begin(pass) {
     pass.effects = [];
   },

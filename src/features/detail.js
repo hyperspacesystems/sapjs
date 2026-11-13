@@ -90,6 +90,7 @@ function resolveDetail(pass, el, parentObj, ctx) {
 
 export const detailFeature = {
   name: "detail",
+  order: 10,
   begin(pass) {
     pass.deferredDetails = [];
   },

@@ -15,6 +15,8 @@
 // (beginReads/endReads); a shadow root, an iframe, another document, a detached tree
 // or a missing MutationObserver reads straight through.
 
+import { closedOwner, walkVisible } from "./registry.js";
+
 let cells = new WeakMap();
 let rows = new WeakMap();
 let observer = null;
@@ -31,13 +33,16 @@ function invalidate(records) {
       continue;
     }
     for (let el = parent; el; el = el.parentElement) cells.delete(el);
-    for (const node of record.addedNodes || []) {
-      if (node.nodeType !== 1) continue;
-      cells.delete(node);
-      rows.delete(node);
-      for (const el of node.querySelectorAll("*")) { cells.delete(el); rows.delete(el); }
-    }
+    // Nothing inside a closed plugin boundary is ever read, so nothing there is cached.
+    const added = record.addedNodes;
+    if (!added || !added.length || (parent && closedOwner(parent))) continue;
+    for (const node of added) if (node.nodeType === 1) walkVisible(node, forget);
   }
+}
+
+function forget(el) {
+  cells.delete(el);
+  rows.delete(el);
 }
 
 export function keepsRows() { return enabled; }

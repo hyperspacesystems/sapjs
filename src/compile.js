@@ -7,18 +7,77 @@ const ARGS = ["state", "item", "el", "root", "fmt", "num", "sum", "count", "avg"
 
 const cache = new Map();
 
+// Helpers plugins add. They are not arguments: the frozen 13 argument function is made
+// inside an outer function whose parameters are the helper names, so its signature
+// never changes. `awaited` reads an expression token by token: a string literal, a piece
+// of template literal text (from a backtick, or from the } that ends a hole, to the next
+// backtick or ${), a brace, a spread, a call to a helper of a plugin that is known and
+// has not installed (the one captured group), or any other run of name characters. An
+// expression that makes such a call outside every string and every piece of template
+// text waits for that plugin.
+let helperNames = [];
+let helperValues = [];
+let awaited = null;
+let owners = null;
+
+const TEXT = /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[`}](?:\\.|[^`\\])*?(?:`|\$\{)|[{}]/.source;
+
+// installed: { name: function }. pending: Map of helper name -> plugin name.
+export function setHelpers(installed, pending) {
+  helperNames = Object.keys(installed);
+  helperValues = Object.values(installed);
+  const names = [...pending.keys()].filter((name) => unclaimed(name) && !(name in installed));
+  owners = pending;
+  awaited = names.length ? new RegExp(`${TEXT}|\\.{3}|(${names.join("|")})\\s*\\(|[\\w$.]+`, "g") : null;
+  cache.clear();
+}
+
+// True when the browser or the page has a global of this name at this moment. An
+// element the browser lists under its id is not a global of that kind.
+export function isGlobal(name) {
+  return name in globalThis && globalThis[name]?.nodeType !== 1;
+}
+
+// A plain name that means nothing yet: it is not one of the frozen arguments, and not
+// a global.
+function unclaimed(name) {
+  return /^[a-z_]\w*$/i.test(name) && !ARGS.includes(name) && !isGlobal(name);
+}
+
+// A plugin may add a helper under a name that is unclaimed and that the language lets a
+// function take as a parameter. A reserved word is refused here: as a parameter it would
+// stop every expression on the page from compiling.
+export function isHelperName(name) {
+  try {
+    return unclaimed(name) && !!new Function(name, '"use strict"');
+  } catch {
+    return false;
+  }
+}
+
+// The plugin an expression waits for, or null. The global is looked up now, not when
+// the helper was declared: a name the page has defined since then is the page's.
+// `open` holds what the scan is inside, innermost last: a { or the piece of template
+// text that opened a hole. The } that ends a hole is followed by template text. Any
+// other } is followed by code, so the scan goes back to just after it.
+export function waitsFor(src) {
+  const open = [];
+  let m;
+  if (awaited) for (awaited.lastIndex = 0; (m = awaited.exec(src)); ) {
+    const [token, name] = m;
+    if (name && unclaimed(name)) return owners.get(name);
+    if (token[0] === "}" && !open.pop()?.[1]) awaited.lastIndex = m.index + 1;
+    else if (token.endsWith("{")) open.push(token);
+  }
+  return null;
+}
+
 const STATE_REF = /\bstate\.([a-z][a-z0-9_]*)/g;
 const ITEM_REF = /\bitem\.([a-z][a-z0-9_]*)/g;
 
 function extractDeps(src) {
-  const state = new Set();
-  const item = new Set();
-  let m;
-  STATE_REF.lastIndex = 0;
-  while ((m = STATE_REF.exec(src))) state.add(m[1]);
-  ITEM_REF.lastIndex = 0;
-  while ((m = ITEM_REF.exec(src))) item.add(m[1]);
-  return { state, item };
+  const named = (ref) => new Set([...(src || "").matchAll(ref)].map((m) => m[1]));
+  return { state: named(STATE_REF), item: named(ITEM_REF) };
 }
 
 // Compile an expression to a function with the frozen signature.
@@ -31,12 +90,16 @@ export function compile(src, statement = false) {
 
   try {
     const body = statement ? `"use strict";\n${src}` : `"use strict"; return (${src});`;
-    const fn = new Function(...ARGS, body);
-    entry = { fn, src, statement, deps: extractDeps(src), error: null };
+    const fn = helperNames.length
+      ? new Function(...helperNames, `return function(${ARGS}){${body}\n}`)(...helperValues)
+      : new Function(...ARGS, body);
+    entry = { fn, src, statement, deps: extractDeps(src), error: null, waits: waitsFor(src) };
   } catch (err) {
-    entry = { fn: null, src, statement, deps: { state: new Set(), item: new Set() }, error: err };
+    entry = { fn: null, src, statement, deps: { state: new Set(), item: new Set() }, error: err, waits: null };
   }
-  cache.set(key, entry);
+  // An entry that waits is not kept: the page may define the name before it is asked
+  // for again.
+  if (!entry.waits) cache.set(key, entry);
   return entry;
 }
 

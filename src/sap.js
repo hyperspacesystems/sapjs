@@ -12,6 +12,9 @@
 //   Sap.doctor()     -> full-page audit
 //   Sap.formats.x    -> register a format
 //   Sap.mount(root?) -> mount a root (or all) explicitly
+//   Sap.use(plugin)  -> install a plugin definition, or load one by name
+//   Sap.plugins      -> declare, load, ready, has, status, retry, base, loader
+//   Sap.flush()      -> settle queued changes and passes now; null, or a promise
 
 import { createSap, autoMount } from "./runtime.js";
 import { createAccessor } from "./scope.js";
