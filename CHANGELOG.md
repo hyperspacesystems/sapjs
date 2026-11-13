@@ -98,6 +98,14 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-13
+
+### Added
+- A grid codec that writes and reads the saved table format of a sheet.
+- A strict byte route for reading canonical grids.
+- Row patches that leave untouched rows byte for byte unchanged.
+- Grid digests that match the ones hosts compute.
+
 ## [0.7.1] - 2026-11-05
 
 ### Changed
