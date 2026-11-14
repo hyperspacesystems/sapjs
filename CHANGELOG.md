@@ -98,6 +98,15 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-13
+
+### Added
+- Plugins can add directives and page helpers through one plugin host.
+- A plugin cannot claim a reserved directive name or a name that already exists on `window`; the message names the helper to rename.
+
+### Fixed
+- A page where every plugin loads no longer adds an extra `online` listener at boot. The plugin host listens for `online` only after a plugin fails to load.
+
 ## [0.8.0] - 2026-11-13
 
 ### Added
