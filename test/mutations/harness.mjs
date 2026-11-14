@@ -17,7 +17,7 @@ const COPIED = ["src", "test", "build", "scripts", "dist", "docs", "demos.html",
 
 class HarnessError extends Error {}
 
-function scratchCopy() {
+export function scratchCopy() {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), "sap-mutation-"));
   for (const name of COPIED) if (existsSync(join(ROOT, name))) cpSync(join(ROOT, name), join(dir, name), { recursive: true });
   symlinkSync(realpathSync(join(ROOT, "node_modules")), join(dir, "node_modules"));
