@@ -64,11 +64,17 @@ function n(v) {
   return typeof v === "number" ? v : Number(v);
 }
 
+// A negative amount reads -$162.40. A value that rounds to zero shows no sign.
+function money(v, digits) {
+  const x = n(v);
+  const shown = Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return (x < 0 && /[1-9]/.test(shown) ? "-$" : "$") + shown;
+}
+
 // The format registry. Extensible via Sap.formats.foo = fn.
 export const formats = {
-  usd: (v) => "$" + n(v).toLocaleString("en-US", { maximumFractionDigits: 0 }),
-  usd2: (v) =>
-    "$" + n(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  usd: (v) => money(v, 0),
+  usd2: (v) => money(v, 2),
   pct: (v) => Math.round(n(v)) + "%",
   pct1: (v) => n(v).toFixed(1) + "%",
   int: (v) => Math.round(n(v)).toLocaleString("en-US"),

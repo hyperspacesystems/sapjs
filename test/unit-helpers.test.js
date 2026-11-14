@@ -60,6 +60,11 @@ describe("format registry", () => {
   test("currency, percent, int, clock", () => {
     expect(formats.usd(1234)).toBe("$1,234");
     expect(formats.usd2(1234.5)).toBe("$1,234.50");
+    expect(formats.usd2(-162.4)).toBe("-$162.40");
+    expect(formats.usd(-1234.4)).toBe("-$1,234");
+    expect(formats.usd2(-0.004)).toBe("$0.00");
+    expect(formats.usd(0)).toBe("$0");
+    expect(formats.usd2("abc")).toBe("$NaN");
     expect(formats.pct(42.4)).toBe("42%");
     expect(formats.int(1234.6)).toBe("1,235");
     expect(formats.clock(125000)).toBe("2:05.0");
