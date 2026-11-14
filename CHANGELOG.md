@@ -98,6 +98,11 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-14
+
+### Fixed
+- Money formats write a negative amount as `-$162.40`, and a value that rounds to zero shows no sign.
+
 ## [0.9.0] - 2026-11-13
 
 ### Added
