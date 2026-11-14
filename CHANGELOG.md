@@ -98,6 +98,14 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
+### Added
+- Typed input in tables, so each cell keeps to the kind of value it holds.
+- Number and date formats for cells, so values read the same way every time.
+- Table checking that finds cells with broken or mismatched values, and repair for the problems it finds.
+- Undo that puts a table back exactly as it was before each edit.
+
 ## [0.9.1] - 2026-11-14
 
 ### Fixed
