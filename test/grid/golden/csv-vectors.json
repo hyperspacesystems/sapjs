@@ -1,0 +1,530 @@
+{
+  "about": "Delimited text vectors shared with ClayJS Page parseCsv (clayjs/src/page/rich/csv.js). records = [header, ...rows] of parseCsv.",
+  "cases": [
+    {
+      "name": "comma three fields",
+      "text": "a,b,c",
+      "delimiter": ",",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "semicolon three fields",
+      "text": "a;b;c",
+      "delimiter": ";",
+      "detected": ";",
+      "records": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "tab three fields",
+      "text": "a\tb\tc",
+      "delimiter": "\t",
+      "detected": "\t",
+      "records": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "two comma lines crlf",
+      "text": "a,b\r\nc,d",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "two comma lines lf",
+      "text": "a,b\nc,d",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "two comma lines cr",
+      "text": "a,b\rc,d",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "trailing crlf adds no record",
+      "text": "a,b\r\nc,d\r\n",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "leading bom",
+      "text": "﻿a,b\r\n1,2",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "1",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "quoted comma",
+      "text": "\"a,b\",c",
+      "detected": ",",
+      "records": [
+        [
+          "a,b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "doubled quote",
+      "text": "\"say \"\"hi\"\"\",x",
+      "detected": ",",
+      "records": [
+        [
+          "say \"hi\"",
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "quoted lf then crlf rows",
+      "text": "\"line1\nline2\",x\r\ny,z",
+      "detected": ",",
+      "records": [
+        [
+          "line1\nline2",
+          "x"
+        ],
+        [
+          "y",
+          "z"
+        ]
+      ]
+    },
+    {
+      "name": "quoted crlf",
+      "text": "\"line1\r\nline2\",x",
+      "detected": ",",
+      "records": [
+        [
+          "line1\r\nline2",
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "unterminated quote",
+      "text": "\"never closed,x\r\ny",
+      "detected": ",",
+      "error": {
+        "code": "unterminated-quote",
+        "line": 1
+      }
+    },
+    {
+      "name": "unterminated quote on line two",
+      "text": "a,b\r\n\"open",
+      "detected": ",",
+      "error": {
+        "code": "unterminated-quote",
+        "line": 2
+      }
+    },
+    {
+      "name": "ragged short rows are padded",
+      "text": "a,b,c\r\n1\r\n2,3",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "1",
+          "",
+          ""
+        ],
+        [
+          "2",
+          "3",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "header shorter than rows",
+      "text": "a\r\n1,2,3",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "",
+          ""
+        ],
+        [
+          "1",
+          "2",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "empty text",
+      "text": "",
+      "detected": ",",
+      "records": []
+    },
+    {
+      "name": "one field",
+      "text": "x",
+      "detected": ",",
+      "records": [
+        [
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "one empty quoted field",
+      "text": "\"\"",
+      "detected": ",",
+      "records": [
+        [
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "one comma",
+      "text": ",",
+      "detected": ",",
+      "records": [
+        [
+          "",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "two comma lines of empty fields",
+      "text": ",,\r\n,,",
+      "detected": ",",
+      "records": [
+        [
+          "",
+          "",
+          ""
+        ],
+        [
+          "",
+          "",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "blank middle line",
+      "text": "a,b\r\n\r\nc,d",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "",
+          ""
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "two semicolons beat one comma",
+      "text": "a;b,c;d",
+      "detected": ";",
+      "records": [
+        [
+          "a",
+          "b,c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "tie goes to comma",
+      "text": "a,b;c",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b;c"
+        ]
+      ]
+    },
+    {
+      "name": "two tabs beat one comma",
+      "text": "a\tb,c\td",
+      "detected": "\t",
+      "records": [
+        [
+          "a",
+          "b,c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "delimiters inside quotes are not counted",
+      "text": "\"a;b;c\",d",
+      "detected": ",",
+      "records": [
+        [
+          "a;b;c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "custom pipe delimiter",
+      "text": "a|b|c",
+      "delimiter": "|",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "explicit semicolon delimiter",
+      "text": "a,b;c",
+      "delimiter": ";",
+      "detected": ",",
+      "records": [
+        [
+          "a,b",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "quote inside an unquoted field stays",
+      "text": "ab\"c,d",
+      "detected": ",",
+      "records": [
+        [
+          "ab\"c",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "text after a closing quote is kept",
+      "text": "\"a\"b,c",
+      "detected": ",",
+      "records": [
+        [
+          "ab",
+          "c"
+        ]
+      ]
+    },
+    {
+      "name": "spaces are kept",
+      "text": " a , b ",
+      "detected": ",",
+      "records": [
+        [
+          " a ",
+          " b "
+        ]
+      ]
+    },
+    {
+      "name": "two empty quoted fields",
+      "text": "\"\",\"\"",
+      "detected": ",",
+      "records": [
+        [
+          "",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "spreadsheet formulas",
+      "text": "=1+2,@x,-3,+4",
+      "detected": ",",
+      "records": [
+        [
+          "=1+2",
+          "@x",
+          "-3",
+          "+4"
+        ]
+      ]
+    },
+    {
+      "name": "unicode fields",
+      "text": "é,日本,🙂",
+      "detected": ",",
+      "records": [
+        [
+          "é",
+          "日本",
+          "🙂"
+        ]
+      ]
+    },
+    {
+      "name": "one comma line then crlf",
+      "text": "a,b\r\n",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ]
+      ]
+    },
+    {
+      "name": "only crlf",
+      "text": "\r\n",
+      "detected": ",",
+      "records": [
+        [
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "only two lf",
+      "text": "\n\n",
+      "detected": ",",
+      "records": [
+        [
+          ""
+        ],
+        [
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "quoted crlf alone",
+      "text": "\"a\r\nb\"",
+      "detected": ",",
+      "records": [
+        [
+          "a\r\nb"
+        ]
+      ]
+    },
+    {
+      "name": "quoted doubled quote in the middle",
+      "text": "a,\"b\"\"c\"\"\",d",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b\"c\"",
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "quoted field lines",
+      "text": "\"x\"\r\n\"y\"",
+      "detected": ",",
+      "records": [
+        [
+          "x"
+        ],
+        [
+          "y"
+        ]
+      ]
+    },
+    {
+      "name": "detection reads the first line only",
+      "text": "a,b\r\nc;d;e;f",
+      "detected": ",",
+      "records": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c;d;e;f",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "unterminated quote after a quoted line break",
+      "text": "\"x\ny\",a\r\n\"open",
+      "detected": ",",
+      "error": {
+        "code": "unterminated-quote",
+        "line": 3
+      }
+    }
+  ]
+}
