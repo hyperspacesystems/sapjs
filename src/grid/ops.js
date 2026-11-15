@@ -474,9 +474,13 @@ export function needs(action) {
   }
   const rows = [];
   const cols = [];
+  const seenRows = new Set(brought.rows);
+  const seenCols = new Set(brought.cols);
   for (const entry of cellEntries(action)) {
-    if (!rows.includes(entry[0]) && !brought.rows.includes(entry[0])) rows.push(entry[0]);
-    if (!cols.includes(entry[1]) && !brought.cols.includes(entry[1])) cols.push(entry[1]);
+    if (!seenRows.has(entry[0])) rows.push(entry[0]);
+    if (!seenCols.has(entry[1])) cols.push(entry[1]);
+    seenRows.add(entry[0]);
+    seenCols.add(entry[1]);
   }
   return { rows, cols };
 }
@@ -760,6 +764,27 @@ const landing = (rows, record) => {
   return rows.length;
 };
 
+const greatest = (rows) => rows.reduce((top, row) => (top === null || compareRows(top, row) < 0 ? row : top), null);
+
+// Where each record of an action lands in a list that takes it before the next one is asked for.
+// A record that sorts after every row, as the rows of a paste or an import do, lands at the end
+// with no walk through the list.
+function lander(list) {
+  let top = greatest(list());
+  return (record) => {
+    const rows = list();
+    const at = top !== null && compareRows(top, record) <= 0 ? rows.length : landing(rows, record);
+    if (at === rows.length) top = record;
+    return at;
+  };
+}
+
+// Whether the backing finds every row where it is. On a sheet with a repeated row id it does not:
+// the id leads to one of its rows, or to none once that one is deleted. The shorter ways through a
+// batch and a delete are for a backing that does. Any other backing keeps the longer ways, and with
+// them every answer it gave before there was a shorter one.
+const findsRows = (backing) => backing.rows().every((row, i) => backing.rowIndex(row.id) === i);
+
 function withHeight(style, height) {
   const kept = typeof style === "string"
     ? splitDeclarations(style).map((one) => one.trim()).filter((one) => one !== "" && declarationProperty(one) !== "height")
@@ -805,6 +830,7 @@ function mergeRecords(backing) {
     bottom: backing.rows()[box.bottom].id,
     right: backing.cols()[box.right].id,
     anchor: backing.rows()[box.row].id,
+    anchorAt: box.row,
     anchorCol: backing.cols()[box.col].id,
     changed: false,
   }));
@@ -874,7 +900,8 @@ const cutRefusal = (detail = "the move would leave a merge's parts apart") => re
 // the action. A row or column the action inserts or deletes does not count, so a formula that leaves
 // with a deleted record, or arrives with an inserted one, can leave no cached result pointing at the
 // wrong cell. A formula the action moves into a record that stays does count: it moves away from the
-// references it was written against, and its undo would have to move it back.
+// references it was written against, and its undo would have to move it back. A sheet with no
+// formula has none to move, so the guard does not write the action on a copy to look for one.
 const holdsFormula = (store, rows, cols) =>
   store.rows().some(
     (row) =>
@@ -898,6 +925,7 @@ function afterOf(backing, action) {
 
 const guarded = (backing, action, formulas) => {
   if (formulas !== null) return false;
+  if (!backing.hasFormula()) return false;
   const after = afterOf(backing, action);
   if (after === null) return false;
   const rows = new Set(backing.rows().map((row) => row.id).filter((id) => after.rowIndex(id) >= 0));
@@ -921,18 +949,18 @@ const keepsOrder = (before, after) => {
 };
 
 function orderAfter(records, action, axis) {
-  const order = records.map((record) => ({ id: record.id, pos: record.pos }));
   const list = (axis === "rows" ? action.rows : action.cols) ?? [];
   const inserting = action.t === (axis === "rows" ? "insertRows" : "insertCols");
   const deleting = action.t === (axis === "rows" ? "deleteRows" : "deleteCols");
+  if (deleting) {
+    // Each id takes out the first record that holds it.
+    const gone = new Set(list);
+    return records.filter((record) => !gone.delete(record.id)).map((record) => record.id);
+  }
+  const order = records.map((record) => ({ id: record.id, pos: record.pos }));
   if (inserting) {
-    for (const record of list) order.splice(landing(order, record), 0, { id: record.id, pos: record.pos });
-  } else if (deleting) {
-    for (const record of list) {
-      const id = typeof record === "string" ? record : record.id;
-      const at = order.findIndex((one) => one.id === id);
-      if (at >= 0) order.splice(at, 1);
-    }
+    const lands = lander(() => order);
+    for (const record of list) order.splice(lands(record), 0, { id: record.id, pos: record.pos });
   } else {
     for (const record of list) {
       if (record.pos === undefined) continue;
@@ -985,16 +1013,18 @@ function writeInsert(backing, action, { derive, formulas }) {
   const brought = [];
   let wroteFormula = false;
   if (guarded(backing, action, formulas) && movesRows(backing, action)) return engineRefusal();
+  const lands = lander(() => backing.rows());
+  const boxes = mergeBoxes(backing);
+  let frozen = backing.frozen().rows;
   for (const record of action.rows) {
     if (backing.rowIndex(record.id) >= 0 || backing.colIndex(record.id) >= 0) {
       return refusal("exists", `the id ${record.id} is already in the sheet`);
     }
-    const at = landing(backing.rows(), record);
-    const frozen = backing.frozen().rows;
+    const at = lands(record);
     if (record.frozen === true && at > frozen) {
       return refusal("bad_action", `the frozen row ${record.id} would land after the frozen block`);
     }
-    const grown = mergeBoxes(backing).filter((box) => box.row < at && at <= box.bottom);
+    const grown = boxes.filter((box) => box.row < at && at <= box.bottom);
     const nextFrozen = record.frozen === true || at < frozen ? frozen + 1 : frozen;
     if (grown.some((box) => box.row < nextFrozen && box.bottom + 1 >= nextFrozen)) {
       return cutRefusal("the merge would cross the frozen line");
@@ -1005,6 +1035,8 @@ function writeInsert(backing, action, { derive, formulas }) {
     if (record.frozen === true || at < frozen) backing.setFrozen({ rows: frozen + 1 });
     rows.push({ sheet: action.sheet, row: record.id, kind: "insert" });
     for (const box of grown) growMergeRows(backing, action, box, at, cells);
+    rowLanded(boxes, at);
+    frozen = nextFrozen;
     for (const entry of record.cells ?? []) {
       const c = backing.colIndex(entry[0]);
       if (c < 0) return refusal("missing_col", `column ${entry[0]} is not in the sheet`);
@@ -1028,15 +1060,18 @@ function writeDelete(backing, action, { derive, formulas }) {
   const rows = [];
   const cells = [];
   const records = [];
+  let frozen = backing.frozen().rows;
+  // Each merge's anchor row is followed by its index, so it is not looked up again for every row
+  // that goes. A backing that does not find every row keeps the lookup.
+  const followed = findsRows(backing);
   const boxes = mergeRecords(backing);
   if (guarded(backing, action, formulas) && movesRows(backing, action)) return engineRefusal();
   for (const id of action.rows) {
     const at = backing.rowIndex(id);
-    const frozen = backing.frozen().rows;
     const was = backing.rows()[at].frozen === true;
     records.push(recordOf(backing.rows()[at], backing.cols()));
     for (const box of boxes) {
-      const anchorAt = box.anchor === null ? -1 : backing.rowIndex(box.anchor);
+      const anchorAt = followed ? box.anchorAt : box.anchor === null ? -1 : backing.rowIndex(box.anchor);
       if (anchorAt < 0 || anchorAt > at) continue;
       const c = backing.colIndex(box.col);
       const anchor = backing.cell(anchorAt, c);
@@ -1057,13 +1092,18 @@ function writeDelete(backing, action, { derive, formulas }) {
         backing.putCell(at + 1, c, moved);
         cells.push({ sheet: action.sheet, row: backing.rows()[at + 1].id, col: box.col, before: contentOf(below), after: contentOf(moved) });
         box.anchor = backing.rows()[at + 1].id;
+        box.anchorAt = at + 1;
       } else if (at <= anchorAt + rs - 1) {
         box.changed = true;
         backing.putCell(anchorAt, c, withoutSpans(anchor, rs - 1, cs));
       }
     }
     backing.removeRow(at);
-    if (was) backing.setFrozen({ rows: frozen - 1 });
+    for (const box of boxes) box.anchorAt = box.anchorAt === at ? -1 : box.anchorAt > at ? box.anchorAt - 1 : box.anchorAt;
+    if (was) {
+      backing.setFrozen({ rows: frozen - 1 });
+      frozen -= 1;
+    }
     rows.push({ sheet: action.sheet, row: id, kind: "delete" });
   }
   const plain = { v: 1, t: "insertRows", sheet: action.sheet, rows: records };
@@ -1076,20 +1116,22 @@ function writeDelete(backing, action, { derive, formulas }) {
       actions.push({ v: 1, t: "unmerge", sheet: action.sheet, row: box.anchor, col: box.col });
     }
   }
-  const restored = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
-  for (const one of actions) writeAction(restored, one, { derive, formulas });
-  writeInsert(restored, plain, { derive, formulas });
   const restores = [];
-  for (const box of boxes) {
-    if (!box.changed) continue;
-    restores.push({
-      v: 1,
-      t: "merge",
-      sheet: action.sheet,
-      from: [box.row, box.col],
-      to: [box.bottom, box.right],
-      clears: clearsThen(restored, box.row, box.col, box.bottom, box.right),
-    });
+  if (boxes.some((box) => box.changed)) {
+    const restored = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
+    for (const one of actions) writeAction(restored, one, { derive, formulas });
+    writeInsert(restored, plain, { derive, formulas });
+    for (const box of boxes) {
+      if (!box.changed) continue;
+      restores.push({
+        v: 1,
+        t: "merge",
+        sheet: action.sheet,
+        from: [box.row, box.col],
+        to: [box.bottom, box.right],
+        clears: clearsThen(restored, box.row, box.col, box.bottom, box.right),
+      });
+    }
   }
   const inverse = restores.length === 0 ? plain : { v: 1, t: "batch", actions: [...actions, plain, ...restores] };
   return { out: "applied", inverse, changes: { rows, cells } };
@@ -1329,6 +1371,20 @@ function mergeBoxes(backing) {
     });
   });
   return boxes;
+}
+
+// The boxes after a row lands at `at`: a merge at or below it moves down one row, and a merge it
+// lands inside is one row taller.
+function rowLanded(boxes, at) {
+  for (const box of boxes) {
+    if (box.row >= at) {
+      box.row += 1;
+      box.bottom += 1;
+    } else if (box.bottom >= at) {
+      box.bottom += 1;
+      box.rs += 1;
+    }
+  }
 }
 
 const touches = (box, top, bottom, left, right) =>
@@ -1583,26 +1639,43 @@ function writeAction(backing, action, options) {
   return writeSet(backing, action, options);
 }
 
-function fitOne(backing, action, { formulas = null } = {}) {
+// `inPlace` is for a backing that is already a copy the caller throws away: the action is tried on
+// it and stays written there.
+function fitOne(backing, action, { formulas = null, inPlace = false } = {}) {
   if (backing.sheetId !== null && action.sheet !== backing.sheetId) {
     return { code: "bad_action", detail: `the action is for sheet ${action.sheet}, not ${backing.sheetId}` };
   }
   const want = needs(action);
   for (const id of want.rows) if (backing.rowIndex(id) < 0) return { code: "missing_row", detail: `row ${id} is not in the sheet` };
   for (const id of want.cols) if (backing.colIndex(id) < 0) return { code: "missing_col", detail: `column ${id} is not in the sheet` };
-  const scratch = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
+  const scratch = inPlace ? backing : modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
   const out = writeAction(scratch, action, { derive: trial, formulas });
   return out.out === "applied" ? true : { code: out.code, detail: out.detail };
 }
 
+// A batch is tried whole on one copy of the sheet: each of its actions is tried on what the ones
+// before it left there. A backing that does not find every row gets the longer way of a batch
+// nobody tried, where each action is first tried on a copy of its own: a copy that was written to
+// can lose a row with a repeated id, as the sheet can.
 export function fits(backing, action, { formulas = null } = {}) {
   validate(action);
-  if (action.t === "batch") {
-    const scratch = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
+  if (action.t !== "batch") return fitOne(backing, action, { formulas });
+  const scratch = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
+  if (!findsRows(backing)) {
     const out = applyUnchecked(scratch, action, { derive: trial, formulas });
     return out.out === "applied" ? true : { code: out.code, detail: out.detail };
   }
-  return fitOne(backing, action, { formulas });
+  for (const one of action.actions) {
+    let fitted;
+    try {
+      fitted = fitOne(scratch, one, { formulas, inPlace: true });
+    } catch (err) {
+      if (err instanceof GridRefused) return { code: err.code, detail: err.detail };
+      throw err;
+    }
+    if (fitted !== true) return fitted;
+  }
+  return true;
 }
 
 export function apply(backing, action, options = {}) {
@@ -1614,7 +1687,8 @@ export function apply(backing, action, options = {}) {
     throw err;
   }
   if (fitted !== true) return refusal(fitted.code, fitted.detail);
-  return applyUnchecked(backing, action, options);
+  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);
+  return applyFitted(backing, action, options);
 }
 
 // The inverses of a batch's actions, last first. An inverse that is itself a batch is spliced in, so
@@ -1622,7 +1696,13 @@ export function apply(backing, action, options = {}) {
 const flatInverse = (done) => done.slice().reverse().flatMap((inverse) => (inverse.t === "batch" ? inverse.actions : [inverse]));
 
 // The same write without the fits step, for the tests that must reach the batch rollback.
-export function applyUnchecked(backing, action, { derive, formulas = null } = {}) {
+export function applyUnchecked(backing, action, options) {
+  return applyFitted(backing, action, options, apply);
+}
+
+// The write. `each` writes one action of a batch: a batch that fits has tried whole needs no fits
+// step for each action, and one that nobody tried gets it from `apply`.
+function applyFitted(backing, action, { derive, formulas = null } = {}, each = applyFitted) {
   validate(action);
   if (action.t === "batch") {
     const done = [];
@@ -1631,7 +1711,7 @@ export function applyUnchecked(backing, action, { derive, formulas = null } = {}
     const cells = [];
     const table = [];
     for (const one of action.actions) {
-      const out = apply(backing, one, { derive, formulas });
+      const out = each(backing, one, { derive, formulas });
       if (out.out !== "applied") {
         for (let i = done.length - 1; i >= 0; i--) apply(backing, done[i], { derive, formulas });
         return refusal(out.code, out.detail);

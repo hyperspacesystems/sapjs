@@ -21,10 +21,19 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
   const rowIds = new Map();
   const colIds = new Map();
   let formulas = 0;
+  // While no row id repeats, rowIds is put right only as far as a lookup asks. Every row before
+  // `settled` is at the index rowIds holds for it. A later row is there too when the row at that
+  // index has its id, and the lookup that finds otherwise puts the rows from `settled` right, up
+  // to the row it wants. A table with a repeated id gets the whole map again after every change,
+  // as every table once did.
+  let settled = 0;
+  let distinct = true;
 
   const indexRows = () => {
     rowIds.clear();
     store.rows.forEach((row, i) => rowIds.set(row.id, i));
+    settled = store.rows.length;
+    distinct = rowIds.size === settled;
   };
   const indexCols = () => {
     colIds.clear();
@@ -33,6 +42,19 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
   indexRows();
   indexCols();
   formulas = store.rows.reduce((sum, row) => sum + formulasIn(row.cells), 0);
+
+  const rowIndex = (id) => {
+    const at = rowIds.get(id);
+    if (at === undefined) return -1;
+    if (store.rows[at]?.id === id) return at;
+    while (settled < store.rows.length) {
+      const row = store.rows[settled];
+      rowIds.set(row.id, settled);
+      settled += 1;
+      if (row.id === id) break;
+    }
+    return rowIds.get(id);
+  };
 
   const putFields = (record, fields, keys) => {
     for (const key of keys) {
@@ -47,7 +69,7 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
     sheet: store,
     rows: () => store.rows,
     cols: () => store.cols,
-    rowIndex: (id) => rowIds.get(id) ?? -1,
+    rowIndex,
     colIndex: (id) => colIds.get(id) ?? -1,
     frozen: () => ({
       rows: store.rows.filter((row) => row.frozen).length,
@@ -73,8 +95,12 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
       if (record.frozen !== undefined) row.frozen = record.frozen;
       if (record.style !== undefined) row.style = record.style;
       trim(row.cells);
+      const fresh = distinct && !rowIds.has(row.id);
       store.rows.splice(r, 0, row);
-      indexRows();
+      if (fresh) {
+        rowIds.set(row.id, r);
+        if (settled >= r) settled = r + 1;
+      } else indexRows();
       formulas += formulasIn(row.cells);
       return row;
     },
@@ -83,19 +109,21 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
       const [record] = store.rows.splice(r, 1);
       formulas -= formulasIn(record.cells);
       rowIds.delete(record.id);
-      for (let i = r; i < store.rows.length; i++) rowIds.set(store.rows[i].id, i);
+      if (distinct) settled = Math.min(settled, r);
+      else for (let i = r; i < store.rows.length; i++) rowIds.set(store.rows[i].id, i);
       return record;
     },
 
     putRow(r, fields) {
       putFields(store.rows[r], fields, ["id", "pos", "frozen", "style"]);
-      indexRows();
+      if ("id" in fields || !distinct) indexRows();
     },
 
     moveRow(from, to) {
       const [row] = store.rows.splice(from, 1);
       store.rows.splice(to, 0, row);
-      indexRows();
+      if (distinct) settled = Math.min(settled, from, to);
+      else indexRows();
     },
 
     insertCol(c, record) {

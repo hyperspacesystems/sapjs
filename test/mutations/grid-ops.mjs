@@ -20,7 +20,17 @@
 //   |build-style-shape|build-block-shape|build-border-preset|build-border-line
 //   |build-mint-cap|build-same-size|build-same-freeze|build-line-kind|build-insert-limit
 //   |build-insert-count|build-slot-end|build-slot-before|build-move-down|build-like-fields
-//   |build-freeze-past|build-freeze-count|build-unmerge-outside]
+//   |build-freeze-past|build-freeze-count|build-unmerge-outside
+//   |speed-index-rebuild|speed-remove-reindex|speed-settle-all|speed-landing-walk|speed-merge-boxes
+//   |speed-frozen-insert|speed-frozen-delete|speed-needs-walk|speed-order-insert|speed-order-delete
+//   |speed-guard-copy|speed-delete-replay|speed-batch-refit|speed-batch-copies
+//   |speed-settle-insert|speed-settle-remove|speed-settle-move|speed-repeated-id|speed-put-id
+//   |speed-top-stale|speed-top-empty|speed-box-shift|speed-box-grow|speed-frozen-kept|speed-frozen-gone
+//   |speed-guard-formula|speed-delete-merge|speed-batch-fits|speed-batch-thrown|speed-batch-inplace
+//   |speed-batch-untried
+//   |speed-anchor-walk|speed-list-rebuild|speed-sound-refit|speed-sound-rewrite
+//   |speed-repeated-fits|speed-repeated-apply|speed-repeated-found|speed-repeated-delete
+//   |speed-anchor-moved|speed-anchor-shift|speed-anchor-gone]
 // Each entry puts one bug back into the grid engine and names the test that must then fail. With no
 // argument every entry runs, one after another.
 import { pathToFileURL } from "node:url";
@@ -46,6 +56,7 @@ const LAWS_TEST = "test/grid/laws.test.js";
 const BUILD = "src/grid/build.js";
 const BUILD_CELLS_TEST = "test/grid/build-cells.test.js";
 const BUILD_STRUCTURE_TEST = "test/grid/build-structure.test.js";
+const SPEED_TEST = "test/grid/ops-speed.test.js";
 
 const check = (what, find, replace, name, expects) => ({ what, file: CHECK, find, replace, test: CHECK_TEST, name, expects });
 
@@ -70,6 +81,14 @@ const laws = (what, find, replace, name) => ({ what, file: OPS, find, replace, t
 const cellBuilders = (what, find, replace, name) => ({ what, file: BUILD, find, replace, test: BUILD_CELLS_TEST, name, expects: /toBe|toEqual/ });
 
 const structureBuilders = (what, find, replace, name, expects = /toBe|toEqual/) => ({ what, file: BUILD, find, replace, test: BUILD_STRUCTURE_TEST, name, expects });
+
+const speed = (what, file, find, replace, name, expects = /toBe|toEqual/) => ({ what, file, find, replace, test: SPEED_TEST, name, expects });
+
+const COST = "the cost follows the number of rows";
+const COPIES = "the sheet is copied a fixed number of times";
+const ID_MAP = "the row id map answers as a walk through the rows does";
+const BROUGHT = "rows brought in one action land as they do one at a time";
+const DELETED = "rows deleted in one action leave what one at a time leaves";
 
 export const MUTATIONS = {
   "check-duplicate": check(
@@ -862,6 +881,300 @@ export const MUTATIONS = {
     "if (row >= view.rows().length || col >= view.cols().length) refuse(",
     "if (false) refuse(",
     "a request past the sheet's last row or column is refused",
+  ),
+  "speed-index-rebuild": speed(
+    "every row that comes in builds the whole row id map again",
+    BACKING,
+    "      const fresh = distinct && !rowIds.has(row.id);",
+    "      const fresh = false;",
+    COST,
+  ),
+  "speed-remove-reindex": speed(
+    "every row that leaves gives each row after it a new place in the row id map at once",
+    BACKING,
+    "      if (distinct) settled = Math.min(settled, r);\n      else for (let i = r; i < store.rows.length; i++) rowIds.set(store.rows[i].id, i);",
+    "      for (let i = r; i < store.rows.length; i++) rowIds.set(store.rows[i].id, i);",
+    COST,
+  ),
+  "speed-settle-all": speed(
+    "a lookup that finds a place out of date puts every later row right, not only the rows up to the one it wants",
+    BACKING,
+    "      if (row.id === id) break;\n",
+    "",
+    COST,
+  ),
+  "speed-landing-walk": speed(
+    "every record walks the rows from the top to find where it lands",
+    OPS,
+    "const at = top !== null && compareRows(top, record) <= 0 ? rows.length : landing(rows, record);",
+    "const at = landing(rows, record);",
+    COST,
+  ),
+  "speed-merge-boxes": speed(
+    "the merge boxes are read from the whole sheet for every record",
+    OPS,
+    "    const grown = boxes.filter((box) => box.row < at && at <= box.bottom);",
+    "    const grown = mergeBoxes(backing).filter((box) => box.row < at && at <= box.bottom);",
+    COST,
+  ),
+  "speed-frozen-insert": speed(
+    "the frozen rows are counted again for every record an insert brings",
+    OPS,
+    "    const at = lands(record);\n",
+    "    const at = lands(record);\n    frozen = backing.frozen().rows;\n",
+    COST,
+  ),
+  "speed-frozen-delete": speed(
+    "the frozen rows are counted again for every row a delete takes",
+    OPS,
+    "    const at = backing.rowIndex(id);\n    const was = backing.rows()[at].frozen === true;",
+    "    const at = backing.rowIndex(id);\n    frozen = backing.frozen().rows;\n    const was = backing.rows()[at].frozen === true;",
+    COST,
+  ),
+  "speed-needs-walk": speed(
+    "needs walks the list of brought ids for every cell",
+    OPS,
+    "    if (!seenRows.has(entry[0])) rows.push(entry[0]);\n    if (!seenCols.has(entry[1])) cols.push(entry[1]);\n",
+    "    if (!rows.includes(entry[0]) && !brought.rows.includes(entry[0])) rows.push(entry[0]);\n    if (!cols.includes(entry[1]) && !brought.cols.includes(entry[1])) cols.push(entry[1]);\n",
+    COST,
+  ),
+  "speed-order-insert": speed(
+    "the formula guard walks the order from the top for every record an insert brings",
+    OPS,
+    "order.splice(lands(record), 0, { id: record.id, pos: record.pos });",
+    "order.splice(landing(order, record), 0, { id: record.id, pos: record.pos });",
+    COST,
+  ),
+  "speed-order-delete": speed(
+    "the formula guard walks the order from the top for every row a delete takes",
+    OPS,
+    "    return records.filter((record) => !gone.delete(record.id)).map((record) => record.id);",
+    "    const order = records.map((record) => record.id);\n    for (const id of gone) {\n      const at = order.findIndex((one) => one === id);\n      if (at >= 0) order.splice(at, 1);\n    }\n    return order;",
+    COST,
+  ),
+  "speed-guard-copy": speed(
+    "the formula guard writes the action on a copy of a sheet that has no formula",
+    OPS,
+    "  if (!backing.hasFormula()) return false;\n",
+    "",
+    COPIES,
+  ),
+  "speed-delete-replay": speed(
+    "a delete that changes no merge still writes its insert on a copy of the sheet",
+    OPS,
+    "  if (boxes.some((box) => box.changed)) {",
+    "  if (true) {",
+    COPIES,
+  ),
+  "speed-batch-refit": speed(
+    "a batch that fits has tried is tried again, action by action, as it is written",
+    OPS,
+    "  return applyFitted(backing, action, options);\n",
+    "  return applyFitted(backing, action, options, apply);\n",
+    COPIES,
+  ),
+  "speed-batch-copies": speed(
+    "fits copies the sheet for every action of a batch",
+    OPS,
+    "      fitted = fitOne(scratch, one, { formulas, inPlace: true });",
+    "      fitted = fitOne(scratch, one, { formulas });\n      if (fitted === true) fitOne(scratch, one, { formulas, inPlace: true });",
+    COPIES,
+  ),
+  "speed-settle-insert": speed(
+    "a row that comes in after rows that wait for their place marks them as in place",
+    BACKING,
+    "        if (settled >= r) settled = r + 1;",
+    "        settled = r + 1;",
+    ID_MAP,
+  ),
+  "speed-settle-remove": speed(
+    "the rows after one that leaves keep their old place in the row id map",
+    BACKING,
+    "      if (distinct) settled = Math.min(settled, r);",
+    "      if (distinct) settled = Math.min(settled, store.rows.length);",
+    ID_MAP,
+  ),
+  "speed-settle-move": speed(
+    "the rows a moved row passes on its way up keep their old place in the row id map",
+    BACKING,
+    "      if (distinct) settled = Math.min(settled, from, to);",
+    "      if (distinct) settled = Math.min(settled, from);",
+    ID_MAP,
+  ),
+  "speed-repeated-id": speed(
+    "a table with a repeated row id gets the lazy row id map",
+    BACKING,
+    "    distinct = rowIds.size === settled;",
+    "    distinct = true;",
+    "a table with a repeated row id",
+  ),
+  "speed-put-id": backing(
+    "a row that gets a new id keeps its old one in the row id map",
+    "      if (\"id\" in fields || !distinct) indexRows();",
+    "      if (!distinct) indexRows();",
+    "putRow",
+    /toBe|toEqual/,
+  ),
+  "speed-top-stale": speed(
+    "a record that lands at the end is not the one the next record is compared with",
+    OPS,
+    "    if (at === rows.length) top = record;\n",
+    "",
+    BROUGHT,
+  ),
+  "speed-top-empty": speed(
+    "a sheet with no row is asked for its last row",
+    OPS,
+    "const at = top !== null && compareRows(top, record) <= 0 ? rows.length : landing(rows, record);",
+    "const at = compareRows(top, record) <= 0 ? rows.length : landing(rows, record);",
+    "a sheet with no row takes rows",
+    /Cannot read properties of null/,
+  ),
+  "speed-box-shift": speed(
+    "a merge below a row that came in is still looked for at its old rows",
+    OPS,
+    "    if (box.row >= at) {\n      box.row += 1;\n      box.bottom += 1;\n    } else if (box.bottom >= at) {",
+    "    if (box.row < at && box.bottom >= at) {",
+    BROUGHT,
+  ),
+  "speed-box-grow": speed(
+    "a merge a row landed inside is still taken for as tall as before",
+    OPS,
+    "    } else if (box.bottom >= at) {\n      box.bottom += 1;\n      box.rs += 1;\n    }",
+    "    }",
+    BROUGHT,
+  ),
+  "speed-frozen-kept": speed(
+    "an insert counts the frozen rows once and does not add the ones it brings",
+    OPS,
+    "    frozen = nextFrozen;\n",
+    "",
+    BROUGHT,
+  ),
+  "speed-frozen-gone": speed(
+    "a delete counts the frozen rows once and does not take off the ones it removes",
+    OPS,
+    "      frozen -= 1;\n",
+    "",
+    DELETED,
+  ),
+  "speed-guard-formula": rows(
+    "the formula guard is skipped on a sheet that has a formula",
+    "  if (!backing.hasFormula()) return false;",
+    "  if (backing.hasFormula()) return false;",
+    "formula guard",
+  ),
+  "speed-delete-merge": speed(
+    "a delete that changes a merge does not put the merge back in its inverse",
+    OPS,
+    "  if (boxes.some((box) => box.changed)) {",
+    "  if (false) {",
+    DELETED,
+  ),
+  "speed-batch-fits": speed(
+    "fits lets a batch through when one of its actions is refused",
+    OPS,
+    "    if (fitted !== true) return fitted;\n  }\n  return true;",
+    "  }\n  return true;",
+    "fits answers with the code of the action that stops a batch",
+  ),
+  "speed-batch-thrown": speed(
+    "fits throws when an action inside a batch is refused as it is written",
+    OPS,
+    "      if (err instanceof GridRefused) return { code: err.code, detail: err.detail };\n",
+    "",
+    "fits answers with the code of the action that stops a batch",
+    /GridRefused/,
+  ),
+  "speed-batch-inplace": rows(
+    "fits tries each action of a batch on the sheet as it was before the batch",
+    "  const scratch = inPlace ? backing : modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });",
+    "  const scratch = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });",
+    "fits agrees with apply",
+  ),
+  "speed-batch-untried": speed(
+    "a batch nobody tried writes each action with no fits step",
+    OPS,
+    "  return applyFitted(backing, action, options, apply);",
+    "  return applyFitted(backing, action, options);",
+    "a batch nobody tried still refuses an action whole",
+  ),
+  "speed-anchor-walk": speed(
+    "a delete looks the anchor row of every merge up again for each row that goes",
+    OPS,
+    "      const anchorAt = followed ? box.anchorAt : box.anchor === null ? -1 : backing.rowIndex(box.anchor);",
+    "      const anchorAt = box.anchor === null ? -1 : backing.rowIndex(box.anchor);",
+    COST,
+  ),
+  "speed-list-rebuild": speed(
+    "every row that comes in builds the list of row changes again",
+    OPS,
+    '    rows.push({ sheet: action.sheet, row: record.id, kind: "insert" });',
+    '    rows.splice(0, rows.length, ...rows, { sheet: action.sheet, row: record.id, kind: "insert" });',
+    COST,
+  ),
+  "speed-sound-refit": speed(
+    "fits tries every batch the long way, each action on a copy of its own",
+    OPS,
+    "  if (!findsRows(backing)) {",
+    "  if (true) {",
+    COPIES,
+  ),
+  "speed-sound-rewrite": speed(
+    "apply writes every batch the long way, with each action tried again",
+    OPS,
+    '  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);',
+    '  if (action.t === "batch") return applyUnchecked(backing, action, options);',
+    COPIES,
+  ),
+  "speed-repeated-fits": speed(
+    "fits tries a batch the short way on a sheet with a repeated row id",
+    OPS,
+    "  if (!findsRows(backing)) {",
+    "  if (false) {",
+    "a batch that deletes one row of a repeated id and brings the id back is refused, as it was",
+  ),
+  "speed-repeated-apply": speed(
+    "apply writes a batch the short way on a sheet that does not find every row",
+    OPS,
+    '  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);\n',
+    "",
+    "a batch that names a row the sheet no longer finds is refused whole, as it was",
+  ),
+  "speed-repeated-found": speed(
+    "a row counts as found wherever its id leads",
+    OPS,
+    "backing.rows().every((row, i) => backing.rowIndex(row.id) === i);",
+    "backing.rows().every((row, i) => backing.rowIndex(row.id) >= 0);",
+    "a batch that deletes one row of a repeated id and brings the id back is refused, as it was",
+  ),
+  "speed-repeated-delete": speed(
+    "a delete follows the anchor row of a merge by its index on a sheet with a repeated row id",
+    OPS,
+    "  const followed = findsRows(backing);",
+    "  const followed = true;",
+    "a delete under a merge whose anchor row has a repeated id leaves the merge, as it did",
+  ),
+  "speed-anchor-moved": speed(
+    "a merge whose anchor moves down a row is not followed there",
+    OPS,
+    "        box.anchorAt = at + 1;\n",
+    "",
+    DELETED,
+  ),
+  "speed-anchor-shift": speed(
+    "a merge under a row that goes keeps the index its anchor row had",
+    OPS,
+    "box.anchorAt > at ? box.anchorAt - 1 : box.anchorAt;",
+    "box.anchorAt;",
+    DELETED,
+  ),
+  "speed-anchor-gone": speed(
+    "a merge whose anchor row goes is followed on to the row that takes its place",
+    OPS,
+    "box.anchorAt = box.anchorAt === at ? -1 : box.anchorAt > at",
+    "box.anchorAt = box.anchorAt > at",
+    DELETED,
   ),
 };
 
