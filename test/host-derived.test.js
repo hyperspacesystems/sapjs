@@ -8,11 +8,12 @@ import { join } from "node:path";
 const code = readFileSync(join(__dirname, "..", "dist", "sap.js"), "utf8");
 
 function fakeHost() {
-  const host = { repaints: [], mounted: 0, applied: 0 };
+  const host = { repaints: [], options: [], mounted: 0, applied: 0 };
   window.clay = {
     derived: {
-      register: (fn) => {
+      register: (fn, options) => {
         host.repaints.push(fn);
+        host.options.push(options);
         return () => host.repaints.splice(host.repaints.indexOf(fn), 1);
       },
       mounted: () => { host.mounted++; },
@@ -39,6 +40,16 @@ test("registers a repaint hook, announces its first pass, and skips W30", () => 
   document.querySelector("[data-id=a]").setAttribute("data-qty", "5");
   host.repaints[0]();
   expect(document.querySelector("output").textContent).toBe("5");
+});
+
+test("hands the host a flush that settles a pending paint before a save", () => {
+  const host = fakeHost();
+  new Function(code)();
+  expect(typeof host.options[0]?.flush).toBe("function");
+  document.querySelector("[data-id=a]").setAttribute("data-qty", "7");
+  expect(document.querySelector("output").textContent).toBe("2");
+  host.options[0].flush();
+  expect(document.querySelector("output").textContent).toBe("7");
 });
 
 test("a host without the hook still gets the merge-event refresh", () => {

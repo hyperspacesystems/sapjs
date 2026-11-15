@@ -69,6 +69,7 @@ export function createSap({ createAccessor, installInput, debugExtras }) {
     moveInto,
     placeBefore,
     remountIfPresent: () => mountAll(),
+    flush: () => Sap.flush(),
   };
 
   const accessor = createAccessor(runtime);

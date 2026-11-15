@@ -124,10 +124,13 @@ export function installBridges(runtime) {
   };
 
   // A host that treats paints as derived repaints them itself, inside the merge and
-  // before it records any baseline. An older host only announces the merge, so
-  // livesync-applied must refresh synchronously inside the pause window (M2).
+  // before it records any baseline, and calls flush before a save so pending paints
+  // reach the file. An older host only announces the merge, so livesync-applied must
+  // refresh synchronously inside the pause window (M2).
   const derived = capability("derived");
-  const offDerived = derived && typeof derived.register === "function" ? derived.register(refreshConnected) : null;
+  const offDerived = derived && typeof derived.register === "function"
+    ? derived.register(refreshConnected, { flush: runtime.flush })
+    : null;
   const offApplied = typeof offDerived === "function" ? null : onPlatformEvent(document, LIVESYNC_APPLIED, refreshConnected);
 
   // A clay-router route change is not a DOM edit, but expressions read the route

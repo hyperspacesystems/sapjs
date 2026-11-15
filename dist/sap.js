@@ -1235,7 +1235,7 @@ ${src}` : `"use strict"; return (${src});`;
       runtime2.remountIfPresent();
     };
     const derived = capability("derived");
-    const offDerived = derived && typeof derived.register === "function" ? derived.register(refreshConnected) : null;
+    const offDerived = derived && typeof derived.register === "function" ? derived.register(refreshConnected, { flush: runtime2.flush }) : null;
     const offApplied = typeof offDerived === "function" ? null : onPlatformEvent(document, LIVESYNC_APPLIED, refreshConnected);
     const offRoute = onPlatformEvent(document, ROUTE_CHANGED, refreshConnected);
     let undoHandles = null;
@@ -2684,7 +2684,8 @@ ${src}` : `"use strict"; return (${src});`;
       runNow: (app, trigger) => scheduler.runNow(app, trigger),
       moveInto,
       placeBefore,
-      remountIfPresent: () => mountAll2()
+      remountIfPresent: () => mountAll2(),
+      flush: () => Sap2.flush()
     };
     const accessor = createAccessor2(runtime2);
     const debugApi = createDebug(runtime2);
