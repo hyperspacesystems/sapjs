@@ -11,4 +11,5 @@ export { parseInput, editText } from "./input.js";
 export { formatValue, fmtKind, isBuiltin, adjustDecimals, addFormatter } from "./format.js";
 export { serial, civil } from "./dates.js";
 export { cleanStyle, pasteStyle } from "./styles.js";
+export { DelimitedError, detectDelimiter, parseDelimited, writeDelimited, protectField } from "./csv.js";
 export { colName, colIndex, parseRef, parseArea } from "./a1.js";

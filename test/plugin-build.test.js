@@ -28,7 +28,7 @@ beforeAll(() => {
   symlinkSync(realpathSync(join(root, "node_modules")), join(copy, "node_modules"));
   const facts = { name: tally.name, file: "tally", order: tally.order, boundaries: tally.boundaries, helpers: tally.helpers };
   writeFileSync(join(copy, "src", "plugin-manifest.js"), `export const PLUGIN_API = 1;\nexport const MANIFEST = { tally: ${JSON.stringify(facts)} };\n`);
-  mkdirSync(join(copy, "src", "plugins"));
+  mkdirSync(join(copy, "src", "plugins"), { recursive: true });
   copyFileSync(join(root, "test", "plugins", "tally.js"), join(copy, "src", "plugins", "tally.js"));
 
   workspace = join(copy, "workspace");
@@ -121,7 +121,7 @@ test("propagate: ClayJS gets an ES module copy and a classic copy, and the check
 
 test("today: this project names no plugin, builds no plugin file, and propagates the same seven files", () => {
   expect(existsSync(join(root, "dist", "sap-plugins"))).toBe(false);
-  expect(existsSync(join(root, "src", "plugins"))).toBe(false);
+  expect(require("../src/plugin-manifest.js").MANIFEST).toEqual({});
   const empty = join(copy, "workspace-today");
   for (const folder of ["clayjs/entries", "clayjs/src/vendor", "hyperclayjs/src/vendor", "hyper-html-api/src/codecs"]) mkdirSync(join(empty, folder), { recursive: true });
   const wrote = execFileSync(process.execPath, [join(root, "scripts", "propagate.js"), "--root", empty], { encoding: "utf8" });

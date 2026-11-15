@@ -42,7 +42,7 @@ function corner(text) {
 
 // An A1 area as inclusive indexes, whichever corner was written first. A whole column or whole row
 // form leaves the other axis null.
-function spanOf(area) {
+export function spanOf(area) {
   const parts = typeof area === "string" ? area.split(":") : [];
   if (parts.length !== 2) return parseArea(area);
   const [a, b] = parts.map(corner);
