@@ -11,7 +11,16 @@
 //   |fix-frozen-cols|fix-guard-survivors|fix-guard-after|fix-anchor-fmt
 //   |x-split|x-mixed|x-overlap|x-semicolon|x-bg-null|x-row-height
 //   |x-merge-clears|x-merge-targets|x-custom-fmt|x-normal-custom|x-gen-sort|x-text-carry|x-text-builtin
-//   |x-norm-shift|x-span-bound]
+//   |x-norm-shift|x-span-bound
+//   |build-outside|build-grow-limit|build-column-format|build-area-outside|build-format-covered
+//   |build-import-formula|build-empty-item
+//   |build-tie|build-tie-followers|build-like-content|build-like-covered|build-mint-check
+//   |build-area-order|build-move-own-place|build-merge-clears
+//   |build-empty-text|build-own-fmt|build-same-column-format|build-same-style|build-column-area
+//   |build-style-shape|build-block-shape|build-border-preset|build-border-line
+//   |build-mint-cap|build-same-size|build-same-freeze|build-line-kind|build-insert-limit
+//   |build-insert-count|build-slot-end|build-slot-before|build-move-down|build-like-fields
+//   |build-freeze-past|build-freeze-count|build-unmerge-outside]
 // Each entry puts one bug back into the grid engine and names the test that must then fail. With no
 // argument every entry runs, one after another.
 import { pathToFileURL } from "node:url";
@@ -34,6 +43,9 @@ const ROWS_TEST = "test/grid/ops-rows.test.js";
 const COLS_TEST = "test/grid/ops-cols.test.js";
 const MERGE_TEST = "test/grid/ops-merge.test.js";
 const LAWS_TEST = "test/grid/laws.test.js";
+const BUILD = "src/grid/build.js";
+const BUILD_CELLS_TEST = "test/grid/build-cells.test.js";
+const BUILD_STRUCTURE_TEST = "test/grid/build-structure.test.js";
 
 const check = (what, find, replace, name, expects) => ({ what, file: CHECK, find, replace, test: CHECK_TEST, name, expects });
 
@@ -54,6 +66,10 @@ const merges = (what, find, replace, name) => ({ what, file: OPS, find, replace,
 const styles = (what, find, replace, name) => ({ what, file: STYLES, find, replace, test: STYLES_TEST, name, expects: /toBe|toEqual/ });
 
 const laws = (what, find, replace, name) => ({ what, file: OPS, find, replace, test: LAWS_TEST, name, expects: /toBe|toEqual/ });
+
+const cellBuilders = (what, find, replace, name) => ({ what, file: BUILD, find, replace, test: BUILD_CELLS_TEST, name, expects: /toBe|toEqual/ });
+
+const structureBuilders = (what, find, replace, name, expects = /toBe|toEqual/) => ({ what, file: BUILD, find, replace, test: BUILD_STRUCTURE_TEST, name, expects });
 
 export const MUTATIONS = {
   "check-duplicate": check(
@@ -623,6 +639,229 @@ export const MUTATIONS = {
     '      if (record.height !== undefined) {\n        out.push([action.sheet, "row", record.id, "height"]);\n        out.push([action.sheet, "row", record.id, "rowstyle"]);\n      }',
     '      if (record.height !== undefined) out.push([action.sheet, "row", record.id, "height"]);',
     "needs, creates, targets",
+  ),
+  "build-outside": cellBuilders(
+    "a block past the last row or column is built without grow",
+    "if (!grow) refuse(",
+    "if (false) refuse(",
+    "a block past the last row or column is refused without grow",
+  ),
+  "build-grow-limit": cellBuilders(
+    "grow has no limit",
+    "if (moreRows > GROW_ROWS || moreCols > GROW_COLS) {",
+    "if (false) {",
+    "grow stops at 10,000 new rows and 1,000 new columns",
+  ),
+  "build-column-format": cellBuilders(
+    "a whole column format leaves each cell's own format in place",
+    'return format === null ? defaults : { v: 1, t: "batch", actions: [defaults, format] };',
+    "return defaults;",
+    "a whole column format clears each cell's own format in the same batch",
+  ),
+  "build-area-outside": cellBuilders(
+    "an area past the last row or column is not refused",
+    "if (rect.bottom >= rows || rect.right >= cols) refuse(",
+    "if (false) refuse(",
+    "an area past the last row or column is refused",
+  ),
+  "build-format-covered": cellBuilders(
+    "a format names a merge's covered cells",
+    "    if (cell && cell.hidden) return;\n",
+    "",
+    "a format skips a merge's covered cells",
+  ),
+  "build-import-formula": cellBuilders(
+    "an import always keeps formulas",
+    "{ grow: true, formulas, newId }",
+    "{ grow: true, formulas: true, newId }",
+    "an import grows the sheet and writes a formula as text",
+  ),
+  "build-empty-item": cellBuilders(
+    "an empty item is written over an empty or covered cell",
+    "      if (content === null && extra === undefined && !hasContent(old)) return;\n",
+    "",
+    "an empty item over an empty or covered cell is left out",
+  ),
+  "build-tie": structureBuilders(
+    "no tie rule: an insert between two records that share a key throws",
+    "  if (low !== null) while (end < others.length && others[end].pos === low) end++;\n",
+    "",
+    "an insert between two records that share a key",
+    /is not before/,
+  ),
+  "build-tie-followers": structureBuilders(
+    "the records after the insert point keep the shared key, so the new record lands after them",
+    "followers: others.slice(at, end).map(",
+    "followers: others.slice(at, at).map(",
+    "an insert between two records that share a key",
+  ),
+  "build-like-content": structureBuilders(
+    "like copies each cell's content",
+    "cells.push([other.id, null, extra]);",
+    "cells.push([other.id, cellValue(cell), extra]);",
+    "like copies formats and never content",
+  ),
+  "build-like-covered": structureBuilders(
+    "like writes into a cell the new record is covered in",
+    "if (!cell || cell.hidden || covered.has(cross)) return;",
+    "if (!cell || cell.hidden) return;",
+    "like leaves out a cell the new records are covered in",
+  ),
+  "build-mint-check": structureBuilders(
+    "an id the sheet has is accepted",
+    "      if (!free(id)) continue;\n",
+    "",
+    "an id the sheet has, or one this action has taken, is asked for again",
+  ),
+  "build-area-order": structureBuilders(
+    "a reversed range names the wrong rows",
+    "Math.max(a.row, b.row)",
+    "b.row",
+    "a reversed range names the same records in sheet order",
+  ),
+  "build-move-own-place": structureBuilders(
+    "a block moved to its own place gets new keys",
+    "  if (at >= first && at <= last + 1) return null;\n",
+    "",
+    "a block moved to its own place gives no action",
+  ),
+  "build-merge-clears": structureBuilders(
+    "a merge names no cell to clear",
+    "&& cell && !blank(cell)) clears.push(",
+    "&& false) clears.push(",
+    "a merge names every other cell in it that holds something",
+  ),
+  "build-empty-text": cellBuilders(
+    "empty text in a block is written as content",
+    'const content = raw === "" ? null : raw;',
+    "const content = raw;",
+    "empty text in a block is no content",
+  ),
+  "build-own-fmt": cellBuilders(
+    "a cell takes a format equal to its column's as its own",
+    "const want = fmt === colFmt ? null : fmt;",
+    "const want = fmt;",
+    "a block item's format equal to its column's is not written",
+  ),
+  "build-same-column-format": cellBuilders(
+    "a column format the column already shows is written again",
+    ".filter((col) => (col.fmt ?? null) !== fmt)",
+    "",
+    "a request for what the sheet already has gives no action",
+  ),
+  "build-same-style": cellBuilders(
+    "a style property a cell does not hold is removed from it",
+    "if (map[property] !== null || held.has(property)) out[property]",
+    "out[property]",
+    "a request for what the sheet already has gives no action",
+  ),
+  "build-column-area": cellBuilders(
+    "a column format takes an area that is not whole columns",
+    "if (!rectOf(view, area).wholeCols) refuse(",
+    "if (false) refuse(",
+    "a whole column format clears each cell's own format in the same batch",
+  ),
+  "build-style-shape": cellBuilders(
+    "a style that is not an object of properties is taken",
+    'if (style === null || typeof style !== "object" || Array.isArray(style)) refuse(',
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-block-shape": cellBuilders(
+    "a block that is not a list of rows is taken",
+    "if (!Array.isArray(block) || !block.every(Array.isArray)) refuse(",
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-border-preset": cellBuilders(
+    "a border with an unknown preset is taken",
+    'if (border === null || typeof border !== "object" || !PRESETS.includes(border.preset)) refuse(',
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-border-line": cellBuilders(
+    "a border preset with no line is taken",
+    'if (border.preset !== "none" && typeof border.line !== "string") refuse(',
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-mint-cap": structureBuilders(
+    "a newId that keeps giving taken ids is asked one more time",
+    "const MINT_TRIES = 100;",
+    "const MINT_TRIES = 101;",
+    "a newId that keeps giving taken ids is refused after 100 tries",
+  ),
+  "build-same-size": structureBuilders(
+    "a height or width a record already has is written again",
+    ".filter((record) => axis.sizeOf(record) !== size)",
+    "",
+    "a request for what the sheet already has gives no action",
+  ),
+  "build-same-freeze": structureBuilders(
+    "a freeze count the sheet already has is written again",
+    "if (count !== frozen[axis.name]) action[axis.through] = through;",
+    "action[axis.through] = through;",
+    "a request for what the sheet already has gives no action",
+  ),
+  "build-line-kind": structureBuilders(
+    "an area of whole columns names every row",
+    "if (rect[axis.crossWhole]) refuse(",
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-insert-limit": structureBuilders(
+    "an insert has no limit",
+    "if (count > axis.limit) refuse(",
+    "if (false) refuse(",
+    "a count at the limit builds and one more is refused",
+  ),
+  "build-insert-count": structureBuilders(
+    "an insert takes a count that is not a whole number from 1",
+    "if (!Number.isInteger(count) || count < 1) refuse(",
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-slot-end": structureBuilders(
+    "new records go further than one past the last record",
+    "if (at > axis.records(view).length) refuse(",
+    "if (false) refuse(",
+    "a request past the sheet's last row or column is refused",
+  ),
+  "build-slot-before": structureBuilders(
+    "new records go before something that is not a row number or a column name",
+    "if (at < 0) refuse(",
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-move-down": structureBuilders(
+    "a block moved down lands its own length too far",
+    "at < first ? at : at - moved.length",
+    "at",
+    "a block moved down lands before the record the request names",
+  ),
+  "build-like-fields": structureBuilders(
+    "like copies no field of the record",
+    "  for (const key of axis.copied) if (record[key] !== undefined) fields[key] = record[key];\n",
+    "",
+    "like copies formats and never content",
+  ),
+  "build-freeze-past": structureBuilders(
+    "a freeze takes more records than the sheet has",
+    "if (count > records.length) refuse(",
+    "if (false) refuse(",
+    "a request past the sheet's last row or column is refused",
+  ),
+  "build-freeze-count": structureBuilders(
+    "a freeze takes a count that is not a whole number from 0",
+    "if (!Number.isInteger(count) || count < 0) refuse(",
+    "if (false) refuse(",
+    "a request the builders cannot read is refused with a code",
+  ),
+  "build-unmerge-outside": structureBuilders(
+    "an unmerge takes a cell past the sheet",
+    "if (row >= view.rows().length || col >= view.cols().length) refuse(",
+    "if (false) refuse(",
+    "a request past the sheet's last row or column is refused",
   ),
 };
 
