@@ -5,7 +5,8 @@ import { MISSES } from "./support/hostile-cases.js";
 import { CELLS } from "./support/value-cases.js";
 import { cellValue, shown, typed } from "../../src/grid/codec/value.js";
 import { patchGrid } from "../../src/grid/codec/patch.js";
-import { keyBetween, keysBetween } from "../../src/grid/codec/order-keys.js";
+import { isKey, keyBetween, keysBetween } from "../../src/grid/codec/order-keys.js";
+import { buildKeys } from "./support/key-vectors.js";
 
 const VECTORS = JSON.parse(readFileSync(join(__dirname, "golden", "host-vectors.json"), "utf8"));
 
@@ -49,4 +50,34 @@ test("the patch and order key cases in host-vectors.json match the code", () => 
   expect(VECTORS.patches.some((entry) => entry.error?.type === "CodecMiss")).toBe(true);
   for (const [a, b, key] of VECTORS.keys.between) expect(keyBetween(a, b)).toBe(key);
   for (const [a, b, n, keys] of VECTORS.keys.spread) expect(keysBetween(a, b, n)).toEqual(keys);
+});
+
+test("the order key validity and throw cases in host-vectors.json match the code", () => {
+  for (const [key, ok] of VECTORS.keys.valid) expect([key, isKey(key)]).toEqual([key, ok]);
+  expect(VECTORS.keys.valid).toContainEqual(["a0", false]);
+  expect(VECTORS.keys.valid).toContainEqual(["", false]);
+  for (const [a, b, name] of VECTORS.keys.throws) {
+    let caughtName = null;
+    try {
+      keyBetween(a, b);
+    } catch (error) {
+      caughtName = error.name;
+    }
+    expect([a, b, caughtName]).toEqual([a, b, name]);
+  }
+  for (const [, , name] of VECTORS.keys.throws) expect(name).not.toBeNull();
+});
+
+test("keysBetween spreads as finding F11 pins", () => {
+  expect(keysBetween(null, null, 5)).toEqual(["8", "G", "V", "d", "l"]);
+  const spread = keysBetween(null, null, 1000);
+  expect(spread).toHaveLength(1000);
+  for (let i = 0; i < spread.length; i++) {
+    if (i > 0) expect(spread[i] > spread[i - 1]).toBe(true);
+    expect(spread[i].length).toBeLessThanOrEqual(2);
+  }
+});
+
+test("the order key vectors on disk are what the code writes now", () => {
+  expect(VECTORS.keys).toEqual(buildKeys());
 });

@@ -1,5 +1,5 @@
 import { rng } from "./rng.js";
-import { keysBetween } from "./order-keys.js";
+import { keysBetween } from "../../../src/grid/codec/order-keys.js";
 import { shown } from "../../../src/grid/codec/value.js";
 import { tableHtml, textEscape, attrEscape } from "../../../src/grid/codec/write.js";
 

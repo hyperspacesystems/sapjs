@@ -14,7 +14,7 @@ import { CELLS, SHOWN } from "./value-cases.js";
 import { tableHtml } from "../../../src/grid/codec/write.js";
 import { shown, typed } from "../../../src/grid/codec/value.js";
 import { patchGrid } from "../../../src/grid/codec/patch.js";
-import { keyBetween, keysBetween } from "../../../src/grid/codec/order-keys.js";
+import { buildKeys } from "./key-vectors.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, "..", "golden");
@@ -119,13 +119,6 @@ const patches = PATCHES.map(([name, source, ops]) => {
   }
 });
 
-// Fractional order keys: keyBetween on pairs and keysBetween spreads.
-const KEY_PAIRS = [[null, null], ["G", null], [null, "G"], ["G", "V"], ["V", "W"], ["Vz", "W"], ["z", null], ["zz", null], ["1", "2"], ["01", "1"], ["a", "a1"]];
-const keys = {
-  between: KEY_PAIRS.map(([a, b]) => [a, b, keyBetween(a, b)]),
-  spread: [[null, null, 6, keysBetween(null, null, 6)], ["G", "V", 5, keysBetween("G", "V", 5)], [null, null, 60, keysBetween(null, null, 60)]],
-};
-
-writeFileSync(join(GOLDEN, "host-vectors.json"), JSON.stringify({ scan, values, patches, keys }) + "\n");
+writeFileSync(join(GOLDEN, "host-vectors.json"), JSON.stringify({ scan, values, patches, keys: buildKeys() }) + "\n");
 const accepted = scan.filter((entry) => entry.verdict === "accept").length;
 console.log(`wrote ${scan.length} scan cases (${accepted} accepted), ${values.cells.length} cells, ${numbers.length} numbers, ${patches.length} patches (${patches.filter((p) => p.error).length} refused)`);

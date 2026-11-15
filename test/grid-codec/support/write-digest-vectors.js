@@ -8,7 +8,7 @@ import { FIXTURES } from "./fixtures.js";
 import { tableHtml } from "../../../src/grid/codec/write.js";
 import { gridModel } from "../../../src/grid/codec/read.js";
 import { fnv1a, hex, gridDigest, columnIds, tabDigest, rowChange } from "../../../src/grid/codec/digest.js";
-import { keysBetween } from "./order-keys.js";
+import { keysBetween } from "../../../src/grid/codec/order-keys.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, "..", "golden");
