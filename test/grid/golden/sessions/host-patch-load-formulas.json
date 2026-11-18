@@ -1,0 +1,43 @@
+{
+  "name": "host-patch-load-formulas",
+  "about": "a host patch on a table with formulas: the loaded tab formats the patched value, and stale stays while formulas wait",
+  "start": {
+    "fixture": "tiny#0",
+    "patch": [
+      {
+        "range": "B3",
+        "values": [
+          [
+            450
+          ]
+        ]
+      }
+    ]
+  },
+  "commands": [
+    [
+      "set",
+      "A3",
+      "Groceries"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "needs": "D8",
+  "bytes": [
+    "<table grid freeze-cols=\"1\" stale><colgroup><col data-id=\"ca\" data-pos=\"G\" style=\"width:180px\"><col data-id=\"cb\" data-pos=\"V\" fmt=\"$#,##0.00\"><col data-id=\"cc\" data-pos=\"l\" fmt=\"0%\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Item</td><td>Cost</td><td>Share</td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td>Rent</td><td n v=\"1200\">$1,200.00</td><td n f=\"=B2/B$5\" v=\"0.8\">80%</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>Groceries</td><td n v=\"450\">$450.00</td><td n f=\"=B3/B$5\" v=\"0.2\">20%</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td style=\"font-weight:bold\">Total</td><td n f=\"=SUM(B2:B3)\" v=\"1500\">$1,500.00</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td colspan=\"3\" style=\"text-align:center\">Prices as of November</td><td hidden></td><td hidden></td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 853
+}

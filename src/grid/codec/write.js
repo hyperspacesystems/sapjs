@@ -46,15 +46,34 @@ export function cellHtml(cell) {
 export function rowHtml(row) {
   const cells = row.cells.map(cellHtml);
   while (cells.length > 0 && cells[cells.length - 1] === EMPTY_CELL) cells.pop();
+  const hidden = row.hidden ? " hidden" : "";
   const style = row.style !== undefined ? attr("style", row.style) : "";
-  return `<tr${attr("data-id", row.id)}${attr("data-pos", row.pos)}${style}>${cells.join("")}</tr>`;
+  return `<tr${attr("data-id", row.id)}${attr("data-pos", row.pos)}${hidden}${style}>${cells.join("")}</tr>`;
 }
 
 export function colHtml(col) {
   let attrs = attr("data-id", col.id) + attr("data-pos", col.pos);
   if (col.fmt !== undefined) attrs += attr("fmt", col.fmt);
+  if (col.hidden) attrs += " hidden";
   if (col.width !== undefined) attrs += ` style="width:${count(col.width, 0, "width")}px"`;
   return `<col${attrs}>`;
+}
+
+// The index at which each tbody starts among these data rows: every `groupSize` rows, except that
+// a group never ends inside a merge down a column. A group runs on until every merge open at its
+// cut has ended, since a browser draws no cell across two row groups.
+export function groupStarts(rows, groupSize = 50) {
+  const starts = [0];
+  let start = 0;
+  let open = 0;
+  for (let r = 0; r < rows.length; r++) {
+    if (r - start >= groupSize && open <= r) {
+      starts.push(r);
+      start = r;
+    }
+    for (const cell of rows[r].cells ?? []) if (cell && cell.rowspan > 1 && r + cell.rowspan > open) open = r + cell.rowspan;
+  }
+  return starts;
 }
 
 export function tableHtml(sheet, { groupSize = 50 } = {}) {
@@ -72,9 +91,9 @@ export function tableHtml(sheet, { groupSize = 50 } = {}) {
 
   if (frozen.length > 0) html += `<thead>\n${frozen.map(rowHtml).join("\n")}\n</thead>`;
 
-  const groups = Math.max(1, Math.ceil(data.length / groupSize));
-  for (let g = 0; g < groups; g++) {
-    const group = data.slice(g * groupSize, (g + 1) * groupSize);
+  const starts = groupStarts(data, groupSize);
+  for (let g = 0; g < starts.length; g++) {
+    const group = data.slice(starts[g], starts[g + 1] ?? data.length);
     html += "<tbody>\n";
     if (group.length > 0) html += `${group.map(rowHtml).join("\n")}\n`;
     html += "</tbody>";

@@ -1,0 +1,13 @@
+{
+  "name": "fixture-two-tabs-ledger",
+  "about": "the codec golden two-tabs#1 loads with no write and keeps its bytes",
+  "start": {
+    "fixture": "two-tabs#1"
+  },
+  "commands": [],
+  "outcomes": [],
+  "startIssues": [],
+  "issues": [],
+  "sha256": "045df7cc1a55fab1142d985eb35c2aa18f66f6921a500814a9e44a876b46f852",
+  "length": 288397
+}

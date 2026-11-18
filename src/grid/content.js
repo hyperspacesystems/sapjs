@@ -43,6 +43,12 @@ export function effectiveFmt(cell, col) {
   return null;
 }
 
+// Whether a cell shows a number as its plain value under a format no formatter knows: the text a
+// host, or a write with no formatter for the code, leaves there until a formatter shows it.
+export function waitsForFormatter(cell, fmt) {
+  return cell?.n === true && cell.v === undefined && fmtKind(fmt) === "unknown";
+}
+
 // Whether a format brought by typed input is taken. Returns undefined (keep the cell's own fmt
 // as it is), null (remove the cell's own fmt) or a format string (write it as the cell's own fmt).
 export function adoptFmt(effective, columnFmt, brought) {

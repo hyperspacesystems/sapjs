@@ -165,7 +165,7 @@ test("a column typed text keeps 02134", () => {
 
 test("export then import of every fixture gives the same contents", () => {
   const tables = goldenTables();
-  expect(tables.length).toBe(9);
+  expect(tables.length).toBe(11);
   for (const { name, html } of tables) {
     const source = live(html);
     if (source.grid.issues.length > 0) source.grid.repair();

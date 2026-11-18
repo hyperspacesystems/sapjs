@@ -1,0 +1,32 @@
+{
+  "name": "repair-bad-ids",
+  "about": "an id outside the id syntax, a repeated id, a freeze past the last column and a span far past the sheet",
+  "start": {
+    "html": "<table grid freeze-cols=\"9\"><colgroup><col data-id=\"bad id\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"V\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"><td colspan=\"1500\">Wide</td></tr>\n<tr data-id=\"r1\" data-pos=\"V\"><td>a</td><td>b</td></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "col_id_invalid",
+    "row_id_duplicate",
+    "span_too_big",
+    "merge_past_end",
+    "merge_uncovered",
+    "freeze_range"
+  ],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"2\"><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td colspan=\"2\">Wide</td><td hidden></td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td>a</td><td>b</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 269
+}

@@ -1,0 +1,28 @@
+{
+  "name": "repair-short-cols",
+  "about": "the repair input short-cols lists its issues, and repair gives the bytes of short-cols.out.html",
+  "start": {
+    "repair": "short-cols"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "row_too_long"
+  ],
+  "issues": [],
+  "repaired": "short-cols",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"><col data-id=\"c3\" data-pos=\"d\"><col data-id=\"c4\" data-pos=\"l\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>a</td><td>b</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td>c</td><td>d</td><td>e</td><td>f</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 314
+}

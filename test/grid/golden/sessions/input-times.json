@@ -1,0 +1,61 @@
+{
+  "name": "input-times",
+  "about": "typed times and date-times are fractions of a day with the format they were typed in",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      "9:30"
+    ],
+    [
+      "set",
+      "B1",
+      "9:30:15"
+    ],
+    [
+      "set",
+      "C1",
+      "9:30 PM"
+    ],
+    [
+      "set",
+      "D1",
+      "12:00 AM"
+    ],
+    [
+      "set",
+      "A2",
+      "3/14/2026 9:30"
+    ],
+    [
+      "set",
+      "B2",
+      "3/14/2026 9:30:15"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td n v=\"0.395833333333333\" fmt=\"h:mm\">9:30</td><td n v=\"0.396006944444444\" fmt=\"h:mm:ss\">9:30:15</td><td n v=\"0.895833333333333\" fmt=\"h:mm AM/PM\">9:30 PM</td><td n v=\"0\" fmt=\"h:mm AM/PM\">12:00 AM</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td n v=\"46095.3958333333\" fmt=\"m/d/yyyy h:mm\">3/14/2026 9:30</td><td n v=\"46095.3960069444\" fmt=\"m/d/yyyy h:mm:ss\">3/14/2026 9:30:15</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 737
+}

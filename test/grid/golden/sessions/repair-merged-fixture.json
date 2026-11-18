@@ -1,0 +1,41 @@
+{
+  "name": "repair-merged-fixture",
+  "about": "the merged golden's merge past the last row is clamped by the repair, and the sheet then takes writes",
+  "start": {
+    "fixture": "merged#0"
+  },
+  "commands": [
+    [
+      "set",
+      "D1",
+      "x"
+    ],
+    [
+      "repair"
+    ],
+    [
+      "set",
+      "D1",
+      "x"
+    ]
+  ],
+  "outcomes": [
+    "refused needs_repair",
+    "change",
+    "change"
+  ],
+  "startIssues": [
+    "merge_past_end"
+  ],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"m-c0\" data-pos=\"8\"><col data-id=\"m-c1\" data-pos=\"G\"><col data-id=\"m-c2\" data-pos=\"V\"><col data-id=\"m-c3\" data-pos=\"l\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"m-r1\" data-pos=\"8\"><td colspan=\"3\">Title</td><td hidden></td><td hidden></td><td>x</td></tr>",
+    "<tr data-id=\"m-r2\" data-pos=\"G\"><td rowspan=\"2\">Tall</td><td>B2</td><td>C2</td></tr>",
+    "<tr data-id=\"m-r3\" data-pos=\"V\"><td hidden></td><td>B3</td><td></td><td>D3</td></tr>",
+    "<tr data-id=\"m-r4\" data-pos=\"l\"><td colspan=\"2\">Box</td><td hidden></td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 544
+}

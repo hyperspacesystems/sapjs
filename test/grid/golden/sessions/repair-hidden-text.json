@@ -1,0 +1,27 @@
+{
+  "name": "repair-hidden-text",
+  "about": "a hidden cell that holds text is listed as hidden_text and repair shows the text again",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"><td colspan=\"2\">Title</td><td hidden>kept</td></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "hidden_text"
+  ],
+  "issues": [],
+  "repaired": "hidden-text",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>Title</td><td>kept</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 183
+}

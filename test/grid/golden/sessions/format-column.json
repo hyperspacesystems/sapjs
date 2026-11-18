@@ -1,0 +1,37 @@
+{
+  "name": "format-column",
+  "about": "a format on whole columns is the column default, and its cells lose their own",
+  "start": {
+    "fixture": "tiny#1"
+  },
+  "commands": [
+    [
+      "format",
+      "B:B",
+      {
+        "fmt": "0.00"
+      }
+    ],
+    [
+      "format",
+      "A:B",
+      {
+        "fmt": "#,##0"
+      }
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"cd\" data-pos=\"G\" fmt=\"#,##0\"><col data-id=\"ce\" data-pos=\"V\" fmt=\"#,##0\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r7\" data-pos=\"G\"><td>Lisbon</td><td n v=\"46095\">46,095</td></tr>",
+    "<tr data-id=\"r8\" data-pos=\"V\"><td>Budget left</td><td n f=\"=5000-Budget!B5\" v=\"3500\">3,500</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 323
+}

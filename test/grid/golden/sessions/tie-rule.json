@@ -1,0 +1,28 @@
+{
+  "name": "tie-rule",
+  "about": "an insert between two records that share a key gives the run fresh keys in one batch",
+  "start": {
+    "repair": "valid-ties"
+  },
+  "commands": [
+    [
+      "insertRows",
+      2,
+      1
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"a\" data-pos=\"G\"><td>x</td></tr>",
+    "<tr data-id=\"rs1\" data-pos=\"S\"></tr>",
+    "<tr data-id=\"b\" data-pos=\"d\"><td>y</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 216
+}

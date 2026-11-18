@@ -1,0 +1,35 @@
+{
+  "name": "repair-no-ids",
+  "about": "the repair input no-ids lists its issues, and repair gives the bytes of no-ids.out.html",
+  "start": {
+    "repair": "no-ids"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "col_id_missing",
+    "col_id_missing",
+    "row_id_missing",
+    "row_id_missing",
+    "col_pos_invalid",
+    "col_pos_invalid",
+    "row_pos_invalid",
+    "row_pos_invalid"
+  ],
+  "issues": [],
+  "repaired": "no-ids",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>Name</td><td>Qty</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td>Box</td><td n>3</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 241
+}

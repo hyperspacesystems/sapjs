@@ -1,0 +1,17 @@
+{
+  "name": "fixture-empty",
+  "about": "the codec golden empty#0 loads with no write and keeps its bytes",
+  "start": {
+    "fixture": "empty#0"
+  },
+  "commands": [],
+  "outcomes": [],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup></colgroup>",
+    "<tbody>",
+    "</tbody></table>"
+  ],
+  "length": 58
+}

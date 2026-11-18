@@ -364,7 +364,6 @@ test("merges follow rows", () => {
 const REFUSED = [
   ["a key that is not a key", insert([{ id: "r0", pos: "0" }]), "bad_key"],
   ["a moved key that is not a key", change([{ id: "r3", pos: "0" }]), "bad_key"],
-  ["a hidden row", insert([{ id: "r0", pos: "5", hidden: true }]), "bad_action"],
   ["a hidden change", change([{ id: "r3", hidden: true }]), "bad_action"],
   ["a height of zero", insert([{ id: "r0", pos: "5", height: 0 }]), "bad_action"],
   ["a height that is not a whole number", change([{ id: "r3", height: 1.5 }]), "bad_action"],
@@ -374,6 +373,16 @@ const REFUSED = [
   ["a colspan in an inserted cell", insert([{ id: "r0", pos: "5", cells: [["ca", "x", { colspan: 2 }]] }]), "merge_cut"],
   ["a delete of a row that is not there", remove(["r9"]), "missing_row"],
 ];
+
+test("an inserted hidden row stays hidden, as an undo of its delete puts it back", () => {
+  const store = plain();
+  const before = bytesOf(store);
+  const out = apply(store, insert([{ id: "r0", pos: "5", hidden: true }]), { derive });
+  expect(out.out).toBe("applied");
+  expect(bytesOf(store)).toContain('<tr data-id="r0" data-pos="5" hidden>');
+  expect(apply(store, out.inverse, { derive }).out).toBe("applied");
+  expect(unstale(bytesOf(store))).toEqual(before);
+});
 
 test("refusals", () => {
   for (const [name, action, code] of REFUSED) {

@@ -443,7 +443,11 @@ export function runList(engine, { start, actions, formulas = null, seed = 0, lis
         const found = c9Single(prev, scratch.sheet, members[k]);
         if (found) return [found[0], { member: k, detail: found[1] }];
       }
-      if (stable(scratch.sheet) !== stable(sheet)) return ["C9 a batch is its members in order", null];
+      // The stale mark for a number waiting for a formatter is judged on the cells as the whole batch
+      // leaves them (`marked` in ops.js), so a member can mark a table its batch leaves unmarked.
+      const ended = clone(scratch.sheet);
+      if (ended.stale === true && sheet.stale === undefined) delete ended.stale;
+      if (stable(ended) !== stable(sheet)) return ["C9 a batch is its members in order", null];
       return null;
     };
     const c9 = c9Of(was, backing.sheet, action);

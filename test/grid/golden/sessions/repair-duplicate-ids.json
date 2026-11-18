@@ -1,0 +1,30 @@
+{
+  "name": "repair-duplicate-ids",
+  "about": "the repair input duplicate-ids lists its issues, and repair gives the bytes of duplicate-ids.out.html",
+  "start": {
+    "repair": "duplicate-ids"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "row_id_duplicate",
+    "row_id_duplicate"
+  ],
+  "issues": [],
+  "repaired": "duplicate-ids",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>a</td><td n>1</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td>b</td><td n>2</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"l\"><td>c</td><td n>3</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 294
+}

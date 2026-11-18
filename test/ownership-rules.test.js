@@ -1,6 +1,7 @@
 // Plugin ownership rules: what a plugin paints under its own boundary, read as plain
-// data with no engine and no plugin code loaded. The rules here are the ones the grid
-// will ship: a formula cell owns its text, and `n` is painted on every cell.
+// data with no engine and no plugin code loaded. The rules here are an example in the grid's
+// shape: a formula cell owns its text, and `n` is painted on every cell. The grid plugin itself
+// declares only the `n` rule (src/plugins/grid.js).
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

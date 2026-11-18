@@ -1,7 +1,7 @@
 // node test/mutations/grid-plugin.mjs [plugin-echo|plugin-changes|plugin-full|plugin-paused|plugin-on-table
 //   |plugin-schedule|plugin-per-change|plugin-remove-parent|plugin-forget|plugin-forget-dispose
-//   |plugin-api-map|plugin-unmount|plugin-ownership-v|plugin-lint-list|plugin-lint-follow
-//   |plugin-lint-claim|plugin-maywrite|plugin-load-repairs]
+//   |plugin-api-map|plugin-unmount|plugin-ownership-old|plugin-lint-list|plugin-lint-follow
+//   |plugin-lint-claim|plugin-maywrite|plugin-load-repairs|plugin-disposed]
 // Each entry puts one bug back into the grid plugin, or into the row read it relies on, and names
 // the test that must then fail. With no argument every entry runs, one after another.
 import { pathToFileURL } from "node:url";
@@ -63,16 +63,16 @@ export const MUTATIONS = {
   "plugin-forget-dispose": plugin("forgetting a table keeps its Grid", "      unlist(table);\n      known.dispose();\n", "      unlist(table);\n", FORGOTTEN),
   "plugin-api-map": plugin(
     "Sap.grid makes a Grid the plugin does not know",
-    "        tables.set(table, known);\n",
+    "      tables.set(table, known);\n",
     "",
     "Sap.grid exists after install, and Sap.use called twice still gives one grid per table",
   ),
   "plugin-unmount": plugin("dispose keeps every Grid", "        for (const [table, known] of tables) forget(table, known);\n", "", "Sap.unmount leaves no listener"),
-  "plugin-ownership-v": plugin(
-    "a formula cell's v is not painted",
-    'select: "td[f]", text: true, attrs: ["v"] },',
-    'select: "td[f]", text: true },',
-    "the ownership rules say a formula cell's text and v, a value cell's text, and every cell's n are painted",
+  "plugin-ownership-old": plugin(
+    "the old rules are back: a formula cell's text and v and a value cell's shown text are painted",
+    'ownership: [{ within: TABLE, select: "td", attrs: ["n"] }],',
+    'ownership: [\n    { within: TABLE, select: "td[f]", text: true, attrs: ["v"] },\n    { within: TABLE, select: "td[v]:not([f])", text: true },\n    { within: TABLE, select: "td", attrs: ["n"] },\n  ],',
+    "painted parts:",
   ),
   "plugin-lint-list": plugin("issues are never listed", "      if (codes.length === 0) return;\n", "      return;\n", LINT),
   "plugin-lint-follow": plugin(
@@ -94,6 +94,15 @@ export const MUTATIONS = {
     "          if (known === undefined && gridOf(table).issues.length > 0) gridOf(table).repair();\n          list(pass, table, known ?? gridOf(table));\n",
     "mount leaves the bytes of every fixture unchanged",
   ),
+  "plugin-disposed": {
+    what: "Sap.grid keeps returning a Grid the page disposed",
+    file: PLUGIN,
+    find: "      const known = createGrid(table, options);\n",
+    replace: "      const known = tables.get(table) ?? createGrid(table, options);\n",
+    test: "test/grid/plugin-dispose.test.js",
+    name: "Sap.grid gives a live Grid again after the page disposed the one it had",
+    expects: /toEqual|toBe/,
+  },
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) mutate(MUTATIONS);

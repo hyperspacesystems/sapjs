@@ -31,24 +31,23 @@ export default {
   api: 1,
   order: 5,
   boundaries: { grid: { opaque: true, on: "table" } },
-  ownership: [
-    { within: TABLE, select: "td[f]", text: true, attrs: ["v"] },
-    { within: TABLE, select: "td[v]:not([f])", text: true },
-    { within: TABLE, select: "td", attrs: ["n"] },
-  ],
+  // What a host such as ClayJS leaves out of its undo, its live-sync merges and its paint check.
+  // Only `n` is declared. A formula's text and v and a value cell's shown text are the file's to a
+  // host: its undo puts back the v that typing a formula over a number removed, its merges carry
+  // them from tab to tab as written, and the text the stale refresh paints when a sheet opens is no
+  // painted difference, so opening a sheet saves nothing.
+  ownership: [{ within: TABLE, select: "td", attrs: ["n"] }],
 
   setup(kit) {
     const tables = new Map();
     const listed = new Map();
     const options = { write: kit.write, mayWrite: kit.mayWrite, schedule: (table) => kit.schedule(table, "plugin:grid") };
 
-    // The Grid of a <table grid>: the same object for the same table, loaded on the first call.
+    // The Grid of a <table grid>: the same object for the same table, loaded on the first call and
+    // again after the page disposed it.
     function gridOf(table) {
-      let known = tables.get(table);
-      if (known === undefined) {
-        known = createGrid(table, options);
-        tables.set(table, known);
-      }
+      const known = createGrid(table, options);
+      tables.set(table, known);
       return known;
     }
     Object.assign(gridOf, {

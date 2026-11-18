@@ -1,0 +1,134 @@
+{
+  "name": "format-style",
+  "about": "style properties in one written order, and the border presets",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "setRange",
+      "A1",
+      [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "d",
+          "e",
+          "f"
+        ],
+        [
+          "g",
+          "h",
+          "i"
+        ]
+      ]
+    ],
+    [
+      "format",
+      "A1:C1",
+      {
+        "style": {
+          "font-weight": "bold",
+          "color": "rgb(255, 0, 0)",
+          "background-color": "#EEE"
+        }
+      }
+    ],
+    [
+      "format",
+      "A2",
+      {
+        "style": {
+          "font-style": "italic",
+          "text-align": "center"
+        }
+      }
+    ],
+    [
+      "format",
+      "A1:C3",
+      {
+        "border": {
+          "preset": "outer",
+          "line": "1px solid #333333"
+        }
+      }
+    ],
+    [
+      "format",
+      "B2",
+      {
+        "border": {
+          "preset": "all",
+          "line": "2px dashed #ff0000"
+        }
+      }
+    ],
+    [
+      "format",
+      "A1:C1",
+      {
+        "style": {
+          "font-weight": null
+        }
+      }
+    ],
+    [
+      "format",
+      "C3",
+      {
+        "border": {
+          "preset": "none"
+        }
+      }
+    ],
+    [
+      "format",
+      "A2:C3",
+      {
+        "border": {
+          "preset": "inner",
+          "line": "1px dotted #999999"
+        }
+      }
+    ],
+    [
+      "format",
+      "A1:A3",
+      {
+        "border": {
+          "preset": "left",
+          "line": "3px double #0000ff"
+        }
+      }
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td style=\"color:#ff0000;background-color:#eeeeee;border-top:1px solid #333333;border-left:3px double #0000ff\">a</td><td style=\"color:#ff0000;background-color:#eeeeee;border-top:1px solid #333333\">b</td><td style=\"color:#ff0000;background-color:#eeeeee;border-top:1px solid #333333;border-right:1px solid #333333\">c</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td style=\"font-style:italic;text-align:center;border-right:1px dotted #999999;border-bottom:1px dotted #999999;border-left:3px double #0000ff\">d</td><td style=\"border-top:2px dashed #ff0000;border-right:1px dotted #999999;border-bottom:1px dotted #999999;border-left:2px dashed #ff0000\">e</td><td style=\"border-right:1px solid #333333;border-bottom:1px dotted #999999\">f</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td style=\"border-right:1px dotted #999999;border-bottom:1px solid #333333;border-left:3px double #0000ff\">g</td><td style=\"border-right:1px dotted #999999;border-bottom:1px solid #333333\">h</td><td>i</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 1299
+}

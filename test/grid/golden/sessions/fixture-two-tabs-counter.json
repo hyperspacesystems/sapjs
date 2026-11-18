@@ -1,0 +1,13 @@
+{
+  "name": "fixture-two-tabs-counter",
+  "about": "the codec golden two-tabs#0 loads with no write and keeps its bytes",
+  "start": {
+    "fixture": "two-tabs#0"
+  },
+  "commands": [],
+  "outcomes": [],
+  "startIssues": [],
+  "issues": [],
+  "sha256": "7215e06f74878b6655ed8e5aeab37a2254dbc95c9ce002988ba11389fef05ca0",
+  "length": 67020
+}

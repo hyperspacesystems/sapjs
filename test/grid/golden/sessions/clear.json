@@ -1,0 +1,36 @@
+{
+  "name": "clear",
+  "about": "clear empties content, formulas included, and keeps each cell's own format and style",
+  "start": {
+    "fixture": "tiny#0"
+  },
+  "commands": [
+    [
+      "clear",
+      "A2:C3"
+    ],
+    [
+      "clear",
+      "A1"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\" style=\"width:180px\"><col data-id=\"cb\" data-pos=\"V\" fmt=\"$#,##0.00\"><col data-id=\"cc\" data-pos=\"l\" fmt=\"0%\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\"></td><td>Cost</td><td>Share</td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"r2\" data-pos=\"G\"></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td style=\"font-weight:bold\">Total</td><td n f=\"=SUM(B2:B3)\" v=\"1500\">$1,500.00</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td colspan=\"3\" style=\"text-align:center\">Prices as of November</td><td hidden></td><td hidden></td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 689
+}

@@ -649,6 +649,20 @@ test("undo brings back a custom format\u0027s text after a changeCols format cha
   );
 });
 
+test("a batch judges its stale mark once, on the cells it leaves: a number it shows plain and then clears marks nothing", () => {
+  const store = customStore(CUSTOM_COL);
+  const batch = {
+    v: 1,
+    t: "batch",
+    actions: [
+      { v: 1, t: "set", sheet: "", cells: [["r2", "c1", 5]] },
+      { v: 1, t: "set", sheet: "", cells: [["r2", "c1", null]] },
+    ],
+  };
+  expect(apply(store, batch, { derive }).out).toBe("applied");
+  expect(bytesOf(store)).toBe(CUSTOM_COL.replace("<td>a</td></tr>", "</tr>"));
+});
+
 test("apply ignores a text under a built-in format", () => {
   const plain = backing();
   const builtin = apply(plain, { v: 1, t: "set", sheet: S, cells: [["r1", "cc", 7, { text: "seven" }]] }, { derive });

@@ -1,0 +1,97 @@
+{
+  "name": "input-numbers",
+  "about": "typed numbers: plain, grouped, a leading point, zero typed and as a value, currency, percent, each with the format its look brings",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      "1,200"
+    ],
+    [
+      "set",
+      "B1",
+      "-7.5"
+    ],
+    [
+      "set",
+      "C1",
+      ".5"
+    ],
+    [
+      "set",
+      "D1",
+      "0"
+    ],
+    [
+      "set",
+      "A2",
+      0
+    ],
+    [
+      "set",
+      "B2",
+      "$5"
+    ],
+    [
+      "set",
+      "C2",
+      "-$1,200.50"
+    ],
+    [
+      "set",
+      "D2",
+      "50%"
+    ],
+    [
+      "set",
+      "A3",
+      "12.5%"
+    ],
+    [
+      "set",
+      "B3",
+      "1,200.50"
+    ],
+    [
+      "set",
+      "C3",
+      "  42  "
+    ],
+    [
+      "set",
+      "D3",
+      "-0"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td n v=\"1200\" fmt=\"#,##0\">1,200</td><td n>-7.5</td><td n>0.5</td><td n>0</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td n>0</td><td n v=\"5\" fmt=\"$#,##0.00\">$5.00</td><td n v=\"-1200.5\" fmt=\"$#,##0.00\">-$1,200.50</td><td n v=\"0.5\" fmt=\"0%\">50%</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td n v=\"0.125\" fmt=\"0.00%\">12.50%</td><td n v=\"1200.5\" fmt=\"#,##0.00\">1,200.50</td><td n>42</td><td n>0</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 715
+}

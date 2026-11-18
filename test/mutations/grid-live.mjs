@@ -4,10 +4,11 @@
 //   |dom-lists-mirror|dom-lists-attr-left|dom-lists-trailing|dom-lists-noop|dom-lists-paused
 //   |tree-count|tree-attributes|tree-text
 //   |dom-regroup|dom-append-last|dom-empty-thead|dom-col-cells|dom-frozen-move
-//   |dom-group-size|dom-group-kept|dom-regroup-loud|dom-col-trim|dom-col-move|dom-reshape
+//   |dom-group-size|dom-group-kept|dom-col-trim|dom-col-move|dom-reshape
 //   |dom-parts-stale|dom-row-frozen|dom-row-count|dom-row-same|dom-row-of
 //   |dom-lists-regroup|dom-lists-append-last|dom-lists-empty-thead|dom-lists-col-cells
 //   |dom-lists-frozen-move
+//   |ops-batch-loud|ops-batch-loud-result
 //   |grid-load-writes|grid-covered|grid-rescan-mirror|grid-hidden-text|grid-same|grid-rescan-issues
 //   |grid-rescan-quiet|grid-hidden-own|grid-hidden-order|grid-hidden-clean|grid-get-text|grid-area-clip
 //   |grid-input-column|grid-on-remove|grid-hidden-th|grid-covered-own|grid-hidden-blank|grid-area-reversed
@@ -26,7 +27,17 @@
 //   |grid-ready-setrange-rows|grid-ready-area|grid-ready-fresh|grid-apply-paused|grid-trim-grow
 //   |grid-apply-value|grid-apply-text|grid-item-plain|grid-item-content|grid-item-formula
 //   |grid-item-content-formula|grid-noop-parts|grid-noop-records|grid-named-guard|grid-index-csv
-//   |grid-apply-gone]
+//   |stale-unknown|stale-early|stale-revision|budget-outerhtml|budget-always-fmt|stale-column-fmt
+//   |stale-damaged-first|stale-load|stale-whole-read|stale-repair|stale-unknown-waiting
+//   |stale-unknown-v
+//   |repair-append-dom|repair-append-model|repair-hidden-kept|csv-import-unprotect
+//   |csv-import-unprotect-any|repair-hidden-first|dom-paint-node|dom-paint-empty|dom-own-text
+//   |dom-own-text-known|grid-settled-column|repair-past-splice|grid-intake-hidden
+//   |grid-intake-hidden-gone|grid-settled-put-back|repair-one-run|repair-text-row-stays
+//   |repair-covers-value|dom-regroup-paused|grid-import-plain|grid-import-plain-text
+//   |grid-import-text-unprotect
+//   |dom-col-delete-regroup
+//   |grid-apply-gone|corpus-golden|corpus-reparse]
 // Each entry puts one bug back into the grid's live layer and names the test that must then fail.
 // With no argument every entry runs, one after another. The dom-lists entries put a bug of the
 // first six back and aim it at the seeded lists, which take about twenty seconds a run. The
@@ -34,7 +45,11 @@
 // dom-lists entries aim at the first part of the lists of every action kind. The grid entries are
 // for the Grid: its read side, its writes, from grid-structure-direct on its rows, columns,
 // merges and freeze, from grid-import-formula on its CSV and TSV, and from grid-foreign-explains on
-// writes from outside the grid and the edits a page and a room make.
+// writes from outside the grid and the edits a page and a room make. The stale entries are for the
+// refresh of a table a host wrote without formatting, the budget entries for the bytes a save
+// takes and the bytes typing makes, and the repair entries for a repair of rows that run past the
+// last column and of text hidden under a merge, and csv-import-unprotect and
+// csv-import-unprotect-any for a text column's import of what our export protected.
 import { pathToFileURL } from "node:url";
 
 import { mutate } from "./harness.mjs";
@@ -84,6 +99,18 @@ const RESULT_ONLY = "a write that changes only a formula's result or a cell's sh
 const PLAIN = "text that is not parsed, and the text and formula of an object item, are made plain as the cell editor makes them";
 const NOOP_RECORDS = "a freeze, a column change or a row change that asks for what the sheet has fires no event, and one that changes something does";
 const gridEdits = (what, find, replace, name, file = GRID) => ({ what, file, find, replace, test: EDITS_TEST, name, expects: /toEqual|toBe/ });
+const STALE_TEST = "test/grid/stale.test.js";
+const HOST_PLAIN = "a host-patched table with no formula loads with its values formatted, its revision at 0, nothing the page sees, and no stale mark";
+const HOST_FORMULA = "a host-patched table with a formula loads with its values formatted and keeps its stale mark, because no engine calculated the formulas again";
+const UNKNOWN_KEPT = "under a format no formatter knows, a cell keeps its text, and the stale mark stays while a number there shows its plain value";
+const HOST_LIVE = "a host patch that reaches an open page is formatted when the grid reads the table again, its appended row with a derived event that leaves the revision";
+const DAMAGED_STALE = "a stale table with issues is left as it is until it is repaired, and the repair formats it and removes the mark";
+const stale = (what, find, replace, name) => ({ what, file: GRID, find, replace, test: STALE_TEST, name, expects: /toEqual|toBe/ });
+const BUDGET_TEST = "test/grid/budget.test.js";
+const budget = (what, file, find, replace, name) => ({ what, file, find, replace, test: BUDGET_TEST, name, expects: /toEqual|toBe/ });
+const REPAIR_TEST = "test/grid/grid-repair.test.js";
+const PAST_LAST = "rows with cells past the last column are repaired once: the new columns move no cell, the repair gives normalizeSheet's bytes, and a second repair changes nothing";
+const repair = (what, file, find, replace, name) => ({ what, file, find, replace, test: REPAIR_TEST, name, expects: /toEqual|toBe/ });
 
 const tree = (what, find, replace) => ({ what, file: TREE, find, replace, test: CELLS_TEST, name: "sameTree lists a planted difference", expects: /toEqual|toBe/ });
 
@@ -91,8 +118,8 @@ const NO_MIRROR = ["    mirror.putCell(r, c, next);\n", ""];
 const NO_REMOVE = ["  if (value === null) node.removeAttribute(name);\n  else node.setAttribute(name, value);", "  if (value !== null) node.setAttribute(name, value);"];
 const NO_TRIM = ["  trimRow(tr);\n", ""];
 const NO_SAME = ["    if (sameCell(old, next)) return;\n", ""];
-const ALL_PAUSED = ["    if (isEdit(old, next)) draw();\n    else write(draw);", "    write(draw);"];
-const NO_REGROUP = ["    if (!grouped(starts)) write(() => regroup(starts));\n", ""];
+const ALL_PAUSED = ['    if (loud > 0 || isEdit(old, next) || (ownText.has(old) && old.text !== (next?.text ?? ""))) draw();\n    else write(draw);', "    write(draw);"];
+const NO_REGROUP = ["    if (!grouped(starts)) regroup(starts);\n", ""];
 const APPEND_LAST = [
   "} else if (next !== null) next.parentNode.insertBefore(tr, next);\n    else bodies[bodies.length - 1].appendChild(tr);",
   "} else bodies[bodies.length - 1].appendChild(tr);",
@@ -155,8 +182,8 @@ export const MUTATIONS = {
   ),
   "dom-text-rewrite": dom(
     "a text that is already in the cell is written again",
-    "  if (td.textContent !== cell.text || td.firstElementChild !== null) td.textContent = cell.text;",
-    "  td.textContent = cell.text;",
+    "    if (only.data !== cell.text) only.data = cell.text;",
+    "    only.data = cell.text;",
     "a content or format write is announced and a derived write is paused",
     /toEqual|toBe/,
   ),
@@ -226,16 +253,10 @@ export const MUTATIONS = {
 
   "dom-group-size": structure("the groups are cut at another size than the writer's", "const GROUP = 50;", "const GROUP = 40;", GROUPS),
   "dom-group-kept": structure("a tbody that lost its last row stays in the table", "      bodies[g].remove();\n", "", GROUPS),
-  "dom-regroup-loud": structure(
-    "the moves that put the groups right are made as ordinary writes",
-    "    if (!grouped(starts)) write(() => regroup(starts));\n",
-    "    if (!grouped(starts)) regroup(starts);\n",
-    "an insert at the top of a 1,000 row sheet",
-  ),
   "dom-col-trim": structure(
     "a removed column leaves empty cells at a row's end",
-    "      td.remove();\n      trimRow(row);\n    }\n    return record;",
-    "      td.remove();\n    }\n    return record;",
+    "      td.remove();\n      trimRow(row);\n    }\n    if (spanned) settle();\n    return record;",
+    "      td.remove();\n    }\n    if (spanned) settle();\n    return record;",
     COLUMNS,
   ),
   "dom-col-move": structure(
@@ -386,7 +407,7 @@ export const MUTATIONS = {
   ),
   "grid-foreign-stale-v": gridWrite(
     "a foreign text edit keeps the old v",
-    '  if (cell.v !== undefined && cell.v === before?.v && cell.text !== (before?.text ?? "") && (known ? !explains(cell, fmt) : cell.fmt === before?.fmt)) delete cell.v;\n',
+    '  if (cell.v !== undefined && cell.text !== (before?.text ?? "") && (known ? !explains(cell, fmt) : cell.v === before?.v && fmt === effectiveFmt(before, beforeColumn))) delete cell.v;\n',
     "",
     FOREIGN,
   ),
@@ -483,8 +504,8 @@ export const MUTATIONS = {
   ),
   "grid-import-dispatch": gridCsv(
     "an import writes without dispatch",
-    "    return send(buildImport(backing, at, itemsAt(at, block, (j) => !asText(j), true), { formulas, newId: mint }));",
-    "    return apply(trimmed(buildImport(backing, at, itemsAt(at, block, (j) => !asText(j), true), { formulas, newId: mint })));",
+    "    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint }));",
+    "    return apply(trimmed(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint })));",
     "an import is one action and one change event, and the sheet grows to hold it",
   ),
   "grid-import-ready": gridCsv(
@@ -525,7 +546,7 @@ export const MUTATIONS = {
   ),
   "grid-foreign-explains": gridForeign(
     "a write from outside the grid that changed the text drops a v the cell's format still shows",
-    " && (known ? !explains(cell, fmt) : cell.fmt === before?.fmt)) delete cell.v;",
+    " && (known ? !explains(cell, fmt) : cell.v === before?.v && fmt === effectiveFmt(before, beforeColumn))) delete cell.v;",
     ") delete cell.v;",
     UNDO_CELL,
   ),
@@ -614,6 +635,33 @@ export const MUTATIONS = {
     "",
     "deleting every row of a merge down a column, or every column of a merge across a row, fires one event whose inverse puts the merge back",
   ),
+  "grid-import-plain": {
+    what: "an import parses a field under its cell's format",
+    file: GRID,
+    find: 'fmt: data && fmtKind(effective) !== "text" ? null : effective',
+    replace: "fmt: effective",
+    test: "test/grid/grid-csv-plain.test.js",
+    name: "an import reads a field as plain data",
+    expects: /toEqual|toBe/,
+  },
+  "grid-import-plain-text": {
+    what: "an import parses a field in a text cell as plain data too",
+    file: GRID,
+    find: 'fmt: data && fmtKind(effective) !== "text" ? null : effective',
+    replace: "fmt: data ? null : effective",
+    test: "test/grid/grid-csv-plain.test.js",
+    name: "an import reads a field as plain data",
+    expects: /toEqual|toBe/,
+  },
+  "grid-import-text-unprotect": {
+    what: "an import into a text cell keeps the apostrophe our export with protect wrote",
+    file: GRID,
+    find: 'const text = data && fmtKind(effective) === "text" ? unprotected(item) : item;',
+    replace: "const text = item;",
+    test: "test/grid/grid-csv-plain.test.js",
+    name: "a protected export imported back over text and percent columns",
+    expects: /toEqual|toBe/,
+  },
   "grid-index-csv": gridEdits(
     "the grid index leaves out the delimited text helpers",
     'export { DelimitedError, detectDelimiter, parseDelimited, writeDelimited, protectField } from "./csv.js";\n',
@@ -621,6 +669,248 @@ export const MUTATIONS = {
     "the grid index exports the delimited text helpers",
     "src/grid/index.js",
   ),
+  "stale-unknown": stale("cells under a format no formatter knows are formatted again", 'if (fmtKind(look) === "unknown") {', "if (false) {", UNKNOWN_KEPT),
+  "stale-early": stale(
+    "the stale mark goes while a formula is waiting",
+    "        if (cell.f !== undefined) {\n          waiting = true;\n          return;\n        }\n",
+    "        if (cell.f !== undefined) return;\n",
+    HOST_FORMULA,
+  ),
+  "stale-revision": stale("the refresh moves the revision", '    return emit({ source: "derived", structure: false,', '    revision += 1;\n    return emit({ source: "derived", structure: false,', HOST_PLAIN),
+  "budget-outerhtml": budget(
+    "the bytes are taken from outerHTML",
+    DOM,
+    "    bytes: () => canonicalGrid(domAdapter, table),",
+    "    bytes: () => table.outerHTML,",
+    "check 1: budget-20k built through setRange gives the writer's bytes for the same model, at or under 30 bytes per filled cell, and not table.outerHTML",
+  ),
+  "budget-always-fmt": budget(
+    "typed input always writes its format, also over a format of the same kind",
+    "src/grid/content.js",
+    "    return brought === columnFmt ? null : brought;\n  }\n  return undefined;\n}",
+    "    return brought === columnFmt ? null : brought;\n  }\n  return brought === columnFmt ? null : brought;\n}",
+    "check 3: the ceiling holds after 1,000 g.set calls typing grouped numbers, currency and dates into columns that already have that format, and no typed cell takes a format of its own",
+  ),
+  "stale-column-fmt": stale("the refresh reads only the cell's own format", "        const look = effectiveFmt(cell, column);", "        const look = cell.fmt ?? null;", HOST_PLAIN),
+  "stale-damaged-first": stale(
+    "the refresh writes into a table with issues",
+    "    if (backing.sheet.stale !== true || issues.length > 0) return null;",
+    "    if (backing.sheet.stale !== true) return null;",
+    DAMAGED_STALE,
+  ),
+  "stale-load": stale("loading leaves a stale table as the host wrote it", "\n  refresh();\n\n  const grid = {", "\n\n  const grid = {", HOST_PLAIN),
+  "stale-whole-read": stale(
+    "a whole read leaves a host patch unformatted",
+    "structure: true, cells: [], rows: noRecords(), cols: noRecords() });\n    refresh();\n",
+    "structure: true, cells: [], rows: noRecords(), cols: noRecords() });\n",
+    HOST_LIVE,
+  ),
+  "stale-repair": stale("a repair leaves the stale mark", "    schedule(table);\n    refresh();\n", "    schedule(table);\n", DAMAGED_STALE),
+  "stale-unknown-waiting": stale(
+    "a plain number under a format no formatter knows leaves nothing waiting",
+    "          if (waitsForFormatter(cell, look)) waiting = true;\n",
+    "",
+    UNKNOWN_KEPT,
+  ),
+  "stale-unknown-v": {
+    what: "every number under a format no formatter knows keeps the mark, formatted or not",
+    file: "src/grid/content.js",
+    find: 'cell?.n === true && cell.v === undefined && fmtKind(fmt) === "unknown"',
+    replace: 'cell?.n === true && fmtKind(fmt) === "unknown"',
+    test: STALE_TEST,
+    name: UNKNOWN_KEPT,
+    expects: /toEqual|toBe/,
+  },
+  "repair-append-dom": repair("a column added after the last one moves the cells of a row that reaches it in the table", DOM, "    if (c === colEls.length - 1) return col;\n", "", PAST_LAST),
+  "repair-append-model": repair(
+    "a column added after the last one moves the cells of a row that reaches it in the mirror",
+    "src/grid/backing-model.js",
+    "      if (c < store.cols.length - 1) for (const row of store.rows) if (row.cells.length > c) row.cells.splice(c, 0, null);",
+    "      for (const row of store.rows) if (row.cells.length > c) row.cells.splice(c, 0, null);",
+    PAST_LAST,
+  ),
+  "repair-hidden-kept": repair(
+    "a hidden cell shown again under a merge down a column takes an empty cell before it",
+    "src/grid/normalize.js",
+    "const kept = (r, c, cell) => shownCells.has(cell);",
+    "const kept = () => false;",
+    "text in a hidden cell under a merge down a column is shown where it was, and the cells beside it keep their columns",
+  ),
+  "repair-hidden-first": repair(
+    "each hidden text is shown and its merge undone before the next is shown, at a place read before the undo moved its row",
+    "src/grid/normalize.js",
+    "    shownCells.add(shown);\n  }\n  const kept = (r, c, cell) => shownCells.has(cell);\n  for (const cell of shownCells) {\n    for (let place = placeOf(sheet, cell); place !== null; place = placeOf(sheet, cell)) {\n",
+    "    shownCells.add(shown);\n    const kept = (r, c, cell) => shownCells.has(cell);\n    for (let place = placeOf(sheet, shown); place !== null; place = placeOf(sheet, shown)) {\n",
+    "two hidden texts under one merge down a column, the second in a row with no placeholder for the merge: repair keeps every text, and the row's shown cell stays in the column the page drew it in",
+  ),
+  "repair-past-splice": repair(
+    "a shown cell under an undone merge in a row below takes an empty cell before it, so a hidden text shown in that row moves a column right",
+    "src/grid/normalize.js",
+    "        past.push(covered ?? null);\n        target.cells[col + j] = null;\n",
+    "        target.cells.splice(col + j, 0, null);\n",
+    "a merge down and across over a row with its own value and a hidden note: repair keeps the value in the column the page drew it in and shows the note where it was",
+  ),
+  "repair-text-row-stays": repair(
+    "an undone span moves a shown cell of a row with hidden text one column right, as in a row the slot rule placed",
+    "src/grid/normalize.js",
+    " && !stays(row + i)) {",
+    ") {",
+    "a repair keeps a row with hidden text in the columns its cells sit at",
+  ),
+  "repair-covers-value": repair(
+    "a kept span is filled with placeholders over a value an earlier undo moved under it",
+    "src/grid/normalize.js",
+    "      if (coversValue(sheet, r, c, cs, rs)) {\n",
+    "      if (false) {\n",
+    "a repair that undoes a span over a value keeps that value even when another span it kept now covers it",
+  ),
+  "repair-one-run": repair(
+    "the repair runs once, so a table whose first run leaves work for a second needs a second repair",
+    "src/grid/normalize.js",
+    "const RUNS = 4;",
+    "const RUNS = 1;",
+    "one repair settles a table whose first run leaves work for a second",
+  ),
+  "grid-intake-hidden": repair(
+    "a write from outside the grid that puts text in a cell hidden under a merge is not checked, so the sheet does not refuse until repair",
+    "src/grid/grid.js",
+    '      if (indexes.some(hidesText) || issues.some((issue) => issue.code === "hidden_text" && indexes.includes(issue.row))) check();\n',
+    "",
+    "text a write from outside the grid puts in a cell hidden under a merge is found at once: an unmerge refuses until a repair shows it",
+  ),
+  "grid-intake-hidden-gone": repair(
+    "a write from outside the grid that takes away the text of a cell hidden under a merge leaves its issue",
+    "src/grid/grid.js",
+    ' || issues.some((issue) => issue.code === "hidden_text" && indexes.includes(issue.row))) check();',
+    ") check();",
+    "hidden text a write from outside the grid takes away again leaves no issue",
+  ),
+  "dom-paint-node": {
+    what: "a cell's text is written as a new text node, so an undo record kept from an edit before names a node no longer there",
+    file: "src/grid/backing-dom.js",
+    find: "  if (only !== null && only === td.lastChild && only.nodeType === only.TEXT_NODE && cell.text !== \"\") {\n",
+    replace: "  if (false) {\n",
+    test: "test/grid/grid-undo.test.js",
+    name: "two undos after a column format put back the typed number, then the text it replaced",
+    expects: /toEqual|toBe/,
+  },
+  "dom-paint-empty": {
+    what: "a cleared cell keeps an empty text node, which a parser of its bytes does not build",
+    file: "src/grid/backing-dom.js",
+    find: " && cell.text !== \"\") {\n",
+    replace: ") {\n",
+    test: "test/grid/grid-undo.test.js",
+    name: "after a column format, undo takes away the text node typed into an emptied cell, then puts back the text it cleared",
+    expects: /toEqual|toBe/,
+  },
+  "dom-own-text": {
+    what: "a column format change writes over text no formatter can make again as a write that is not an edit, so an undo cannot put it back",
+    file: "src/grid/backing-dom.js",
+    find: '    if (loud > 0 || isEdit(old, next) || (ownText.has(old) && old.text !== (next?.text ?? ""))) draw();\n',
+    replace: "    if (loud > 0 || isEdit(old, next)) draw();\n",
+    test: "test/grid/grid-undo.test.js",
+    name: "an undo of a column format over a format no formatter knows puts back the text that format showed, with its number",
+    expects: /toEqual|toBe/,
+  },
+  "dom-own-text-known": {
+    what: "a column format change writes every cell of the column as an edit, under a known format too",
+    file: "src/grid/backing-dom.js",
+    find: '&& fmtKind(effectiveFmt(held, column)) === "unknown") ownText.add(held);',
+    replace: ") ownText.add(held);",
+    test: "test/grid/grid-undo.test.js",
+    name: "two undos after a column format put back the typed number, then the text it replaced",
+    expects: /toEqual|toBe/,
+  },
+  "grid-settled-column": {
+    what: "a foreign write that changes a column's format and its cells' text drops the number of a cell under a format no formatter knows",
+    file: GRID,
+    find: ": cell.v === before?.v && fmt === effectiveFmt(before, beforeColumn))",
+    replace: ": cell.v === before?.v && cell.fmt === before?.fmt)",
+    test: "test/grid/grid-undo.test.js",
+    name: "an undo of a column format over a format no formatter knows puts back the text that format showed, with its number",
+    expects: /toEqual|toBe/,
+  },
+  "ops-batch-loud": {
+    what: "a batch redraws a formatted column's cells as writes that are not edits, so an undo of the batch puts back the redrawn text of a cell a later action cleared, without its number",
+    file: "src/grid/ops.js",
+    find: '(action?.t === "batch" && backing.loudly ? backing.loudly(run) : run())',
+    replace: "run()",
+    test: "test/grid/grid-undo.test.js",
+    name: "an undo of one batch that formats a column and clears a number typed before it gives back the number",
+    expects: /toEqual|toBe/,
+  },
+  "ops-batch-loud-result": {
+    what: "a batch shows a formula's result as a write that is not an edit, so an undo of the batch leaves the result beside the text it puts back",
+    file: "src/grid/ops.js",
+    find: '(action?.t === "batch" && backing.loudly ? backing.loudly(run) : run())',
+    replace: "run()",
+    test: "test/grid/grid-undo.test.js",
+    name: "an undo of one batch that writes a formula over text and then gives it a result gives back the text",
+    expects: /toEqual|toBe/,
+  },
+  "dom-regroup-paused": {
+    what: "a row edit moves rows between tbodies as a derived write, so an undo of the edit puts rows back out of order",
+    file: DOM,
+    find: "    if (!grouped(starts)) regroup(starts);\n",
+    replace: "    if (!grouped(starts)) write(() => regroup(starts));\n",
+    test: "test/grid/grid-undo.test.js",
+    name: "an undo of a row move, a delete and an insert across the 50-row group cut",
+    expects: /toEqual|toBe/,
+  },
+  "dom-col-delete-regroup": {
+    what: "a column delete that ends a long vertical merge leaves the rows in the long group, so the live table is not the tree its bytes give",
+    file: DOM,
+    find: "    if (spanned) settle();\n",
+    replace: "",
+    test: "test/grid/backing-dom-structure.test.js",
+    name: "lists of every action kind give the same bytes and the same tree, part 2 of 6",
+    expects: /the live table is the tree its bytes parse to/,
+  },
+  "grid-settled-put-back": {
+    what: "a write from outside the grid that changed the text keeps a v it put back that does not give that text",
+    file: GRID,
+    find: "(known ? !explains(cell, fmt) : cell.v === before?.v",
+    replace: "(known ? cell.v === before?.v && !explains(cell, fmt) : cell.v === before?.v",
+    test: "test/grid/grid-foreign.test.js",
+    name: "a write from outside the grid that puts other text and another v in a formatted cell is read as the text",
+    expects: /toEqual|toBe/,
+  },
+  "csv-import-unprotect": {
+    what: "an import into a column typed text keeps the apostrophe our export wrote",
+    file: GRID,
+    find: "    const fields = block.map((line) => line.map((field, j) => (asText(j) ? unprotected(field) : field)));\n",
+    replace: "    const fields = block;\n",
+    test: "test/grid/grid-csv-protect.test.js",
+    name: "an export with protect, imported into columns typed text, gives back the same text",
+    expects: /toEqual|toBe/,
+  },
+  "csv-import-unprotect-any": {
+    what: "an import into a column typed text drops every leading apostrophe, not only the one our export wrote",
+    file: GRID,
+    find: "const unprotected = (field) => (field.startsWith(\"'\") && protectField(field.slice(1)) === field ? field.slice(1) : field);\n",
+    replace: "const unprotected = (field) => (field.startsWith(\"'\") ? field.slice(1) : field);\n",
+    test: "test/grid/grid-csv-protect.test.js",
+    name: "an apostrophe our export did not write stays in a column typed text, so text exported without protect comes back the same",
+    expects: /toEqual|toBe/,
+  },
+  "corpus-golden": {
+    what: "derive drops n on the value 0",
+    file: "src/grid/content.js",
+    find: '    const cell = { text: typeof text === "string" ? text : raw, n: true };\n',
+    replace: '    const cell = { text: typeof text === "string" ? text : raw };\n    if (content !== 0) cell.n = true;\n',
+    test: "test/grid/corpus.test.js",
+    name: "corpus session",
+    expects: /toEqual|toBe/,
+  },
+  "corpus-reparse": {
+    what: "the DOM backing leaves an old v on a cell that no longer needs one",
+    file: DOM,
+    find: "  for (const name of ATTRIBUTES) setAttribute(td, name, attributeOf(cell, name));\n",
+    replace: '  for (const name of ATTRIBUTES) if (name !== "v" || cell.v !== undefined) setAttribute(td, name, attributeOf(cell, name));\n',
+    test: "test/grid/corpus.test.js",
+    name: "corpus session",
+    expects: /toEqual|toBe/,
+  },
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) mutate(MUTATIONS);

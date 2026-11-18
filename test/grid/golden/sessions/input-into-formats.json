@@ -1,0 +1,64 @@
+{
+  "name": "input-into-formats",
+  "about": "typed input meets the cell's format: a look of the same kind keeps the format, another kind brings its own, and a plain number in a percent cell is a percent",
+  "start": {
+    "fixture": "tiny#0"
+  },
+  "commands": [
+    [
+      "set",
+      "B3",
+      "1,200"
+    ],
+    [
+      "set",
+      "B2",
+      "$7"
+    ],
+    [
+      "set",
+      "C2",
+      "20"
+    ],
+    [
+      "set",
+      "C3",
+      "25%"
+    ],
+    [
+      "format",
+      "A4",
+      {
+        "fmt": "0.00"
+      }
+    ],
+    [
+      "set",
+      "A4",
+      "1,200"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\" style=\"width:180px\"><col data-id=\"cb\" data-pos=\"V\" fmt=\"$#,##0.00\"><col data-id=\"cc\" data-pos=\"l\" fmt=\"0%\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Item</td><td>Cost</td><td>Share</td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td>Rent</td><td n v=\"7\">$7.00</td><td n v=\"0.2\">20%</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>Food</td><td n v=\"1200\" fmt=\"#,##0\">1,200</td><td n v=\"0.25\">25%</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td n v=\"1200\" fmt=\"0.00\">1200.00</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td style=\"font-weight:bold\">Total</td><td n f=\"=SUM(B2:B3)\" v=\"1500\">$1,500.00</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td colspan=\"3\" style=\"text-align:center\">Prices as of November</td><td hidden></td><td hidden></td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 861
+}

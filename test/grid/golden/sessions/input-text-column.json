@@ -1,0 +1,57 @@
+{
+  "name": "input-text-column",
+  "about": "under the format @ everything typed is text, a leading = and a grouped number included",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "format",
+      "A:A",
+      {
+        "fmt": "@"
+      }
+    ],
+    [
+      "set",
+      "A1",
+      "=1+1"
+    ],
+    [
+      "set",
+      "A2",
+      "1,200"
+    ],
+    [
+      "set",
+      "A3",
+      "007"
+    ],
+    [
+      "set",
+      "A4",
+      "TRUE"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\" fmt=\"@\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>=1+1</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td>1,200</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>007</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td t>TRUE</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 460
+}

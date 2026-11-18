@@ -1,0 +1,122 @@
+{
+  "name": "input-text",
+  "about": "forms that stay text in v1, the apostrophe, a lone = and a lone apostrophe, booleans, and text kept exactly as typed",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      "'0123"
+    ],
+    [
+      "set",
+      "B1",
+      "'"
+    ],
+    [
+      "set",
+      "C1",
+      "="
+    ],
+    [
+      "set",
+      "D1",
+      "+5"
+    ],
+    [
+      "set",
+      "A2",
+      "(5)"
+    ],
+    [
+      "set",
+      "B2",
+      "1e5"
+    ],
+    [
+      "set",
+      "C2",
+      "5."
+    ],
+    [
+      "set",
+      "D2",
+      "02134"
+    ],
+    [
+      "set",
+      "A3",
+      "4111111111111111"
+    ],
+    [
+      "set",
+      "B3",
+      "true"
+    ],
+    [
+      "set",
+      "C3",
+      "FALSE"
+    ],
+    [
+      "set",
+      "D3",
+      "  padded  "
+    ],
+    [
+      "set",
+      "A4",
+      "a<b & c"
+    ],
+    [
+      "set",
+      "B4",
+      "line\r\nbreak"
+    ],
+    [
+      "set",
+      "C4",
+      "'TRUE"
+    ],
+    [
+      "set",
+      "D4",
+      "12,34"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "nothing",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>0123</td><td></td><td>=</td><td>+5</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td>(5)</td><td>1e5</td><td>5.</td><td>02134</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>4111111111111111</td><td>TRUE</td><td>FALSE</td><td>  padded  </td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td>a&lt;b &amp; c</td><td>line",
+    "break</td><td t>TRUE</td><td>12,34</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 632
+}

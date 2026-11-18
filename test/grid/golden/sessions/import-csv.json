@@ -1,0 +1,39 @@
+{
+  "name": "import-csv",
+  "about": "CSV with quotes, a quoted line break and a text column, imported as one action that grows the sheet; a field =1+1 stays text",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "importDelimited",
+      "Name,Qty,Zip\r\n\"Smith, Ann\",3,02134\r\nBo,=1+1,07030\r\n\"two\r\nlines\",\"1,200\",\"\"\"q\"\"\"\r\nLast,TRUE,9",
+      "A1",
+      {
+        "types": [
+          "auto",
+          "auto",
+          "text"
+        ]
+      }
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>Name</td><td>Qty</td><td>Zip</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td>Smith, Ann</td><td n>3</td><td>02134</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>Bo</td><td>=1+1</td><td>07030</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td>two",
+    "lines</td><td n v=\"1200\" fmt=\"#,##0\">1,200</td><td>\"q\"</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"><td>Last</td><td>TRUE</td><td t>9</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 623
+}

@@ -1,0 +1,88 @@
+{
+  "name": "tbody-regroup",
+  "about": "rows inserted at the top of a full group move one row across each later group, and deleting them leaves one group again",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"V\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"1\"><td>row 1</td></tr>\n<tr data-id=\"r2\" data-pos=\"2\"><td>row 2</td></tr>\n<tr data-id=\"r3\" data-pos=\"3\"><td>row 3</td></tr>\n<tr data-id=\"r4\" data-pos=\"4\"><td>row 4</td></tr>\n<tr data-id=\"r5\" data-pos=\"5\"><td>row 5</td></tr>\n<tr data-id=\"r6\" data-pos=\"6\"><td>row 6</td></tr>\n<tr data-id=\"r7\" data-pos=\"8\"><td>row 7</td></tr>\n<tr data-id=\"r8\" data-pos=\"9\"><td>row 8</td></tr>\n<tr data-id=\"r9\" data-pos=\"A\"><td>row 9</td></tr>\n<tr data-id=\"r10\" data-pos=\"C\"><td>row 10</td></tr>\n<tr data-id=\"r11\" data-pos=\"D\"><td>row 11</td></tr>\n<tr data-id=\"r12\" data-pos=\"E\"><td>row 12</td></tr>\n<tr data-id=\"r13\" data-pos=\"G\"><td>row 13</td></tr>\n<tr data-id=\"r14\" data-pos=\"H\"><td>row 14</td></tr>\n<tr data-id=\"r15\" data-pos=\"I\"><td>row 15</td></tr>\n<tr data-id=\"r16\" data-pos=\"J\"><td>row 16</td></tr>\n<tr data-id=\"r17\" data-pos=\"K\"><td>row 17</td></tr>\n<tr data-id=\"r18\" data-pos=\"L\"><td>row 18</td></tr>\n<tr data-id=\"r19\" data-pos=\"M\"><td>row 19</td></tr>\n<tr data-id=\"r20\" data-pos=\"O\"><td>row 20</td></tr>\n<tr data-id=\"r21\" data-pos=\"P\"><td>row 21</td></tr>\n<tr data-id=\"r22\" data-pos=\"Q\"><td>row 22</td></tr>\n<tr data-id=\"r23\" data-pos=\"S\"><td>row 23</td></tr>\n<tr data-id=\"r24\" data-pos=\"T\"><td>row 24</td></tr>\n<tr data-id=\"r25\" data-pos=\"U\"><td>row 25</td></tr>\n<tr data-id=\"r26\" data-pos=\"V\"><td>row 26</td></tr>\n<tr data-id=\"r27\" data-pos=\"W\"><td>row 27</td></tr>\n<tr data-id=\"r28\" data-pos=\"X\"><td>row 28</td></tr>\n<tr data-id=\"r29\" data-pos=\"Y\"><td>row 29</td></tr>\n<tr data-id=\"r30\" data-pos=\"Z\"><td>row 30</td></tr>\n<tr data-id=\"r31\" data-pos=\"a\"><td>row 31</td></tr>\n<tr data-id=\"r32\" data-pos=\"b\"><td>row 32</td></tr>\n<tr data-id=\"r33\" data-pos=\"d\"><td>row 33</td></tr>\n<tr data-id=\"r34\" data-pos=\"e\"><td>row 34</td></tr>\n<tr data-id=\"r35\" data-pos=\"f\"><td>row 35</td></tr>\n<tr data-id=\"r36\" data-pos=\"h\"><td>row 36</td></tr>\n<tr data-id=\"r37\" data-pos=\"i\"><td>row 37</td></tr>\n<tr data-id=\"r38\" data-pos=\"j\"><td>row 38</td></tr>\n<tr data-id=\"r39\" data-pos=\"l\"><td>row 39</td></tr>\n<tr data-id=\"r40\" data-pos=\"m\"><td>row 40</td></tr>\n<tr data-id=\"r41\" data-pos=\"n\"><td>row 41</td></tr>\n<tr data-id=\"r42\" data-pos=\"p\"><td>row 42</td></tr>\n<tr data-id=\"r43\" data-pos=\"q\"><td>row 43</td></tr>\n<tr data-id=\"r44\" data-pos=\"r\"><td>row 44</td></tr>\n<tr data-id=\"r45\" data-pos=\"t\"><td>row 45</td></tr>\n<tr data-id=\"r46\" data-pos=\"u\"><td>row 46</td></tr>\n<tr data-id=\"r47\" data-pos=\"v\"><td>row 47</td></tr>\n<tr data-id=\"r48\" data-pos=\"x\"><td>row 48</td></tr>\n<tr data-id=\"r49\" data-pos=\"y\"><td>row 49</td></tr>\n<tr data-id=\"r50\" data-pos=\"z\"><td>row 50</td></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "insertRows",
+      1,
+      2
+    ],
+    [
+      "insertRows",
+      30,
+      1
+    ],
+    [
+      "deleteRows",
+      "1:2"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"1\"><td>row 1</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"2\"><td>row 2</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"3\"><td>row 3</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"4\"><td>row 4</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"5\"><td>row 5</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"6\"><td>row 6</td></tr>",
+    "<tr data-id=\"r7\" data-pos=\"8\"><td>row 7</td></tr>",
+    "<tr data-id=\"r8\" data-pos=\"9\"><td>row 8</td></tr>",
+    "<tr data-id=\"r9\" data-pos=\"A\"><td>row 9</td></tr>",
+    "<tr data-id=\"r10\" data-pos=\"C\"><td>row 10</td></tr>",
+    "<tr data-id=\"r11\" data-pos=\"D\"><td>row 11</td></tr>",
+    "<tr data-id=\"r12\" data-pos=\"E\"><td>row 12</td></tr>",
+    "<tr data-id=\"r13\" data-pos=\"G\"><td>row 13</td></tr>",
+    "<tr data-id=\"r14\" data-pos=\"H\"><td>row 14</td></tr>",
+    "<tr data-id=\"r15\" data-pos=\"I\"><td>row 15</td></tr>",
+    "<tr data-id=\"r16\" data-pos=\"J\"><td>row 16</td></tr>",
+    "<tr data-id=\"r17\" data-pos=\"K\"><td>row 17</td></tr>",
+    "<tr data-id=\"r18\" data-pos=\"L\"><td>row 18</td></tr>",
+    "<tr data-id=\"r19\" data-pos=\"M\"><td>row 19</td></tr>",
+    "<tr data-id=\"r20\" data-pos=\"O\"><td>row 20</td></tr>",
+    "<tr data-id=\"r21\" data-pos=\"P\"><td>row 21</td></tr>",
+    "<tr data-id=\"r22\" data-pos=\"Q\"><td>row 22</td></tr>",
+    "<tr data-id=\"r23\" data-pos=\"S\"><td>row 23</td></tr>",
+    "<tr data-id=\"r24\" data-pos=\"T\"><td>row 24</td></tr>",
+    "<tr data-id=\"r25\" data-pos=\"U\"><td>row 25</td></tr>",
+    "<tr data-id=\"r26\" data-pos=\"V\"><td>row 26</td></tr>",
+    "<tr data-id=\"r27\" data-pos=\"W\"><td>row 27</td></tr>",
+    "<tr data-id=\"rs3\" data-pos=\"WV\"></tr>",
+    "<tr data-id=\"r28\" data-pos=\"X\"><td>row 28</td></tr>",
+    "<tr data-id=\"r29\" data-pos=\"Y\"><td>row 29</td></tr>",
+    "<tr data-id=\"r30\" data-pos=\"Z\"><td>row 30</td></tr>",
+    "<tr data-id=\"r31\" data-pos=\"a\"><td>row 31</td></tr>",
+    "<tr data-id=\"r32\" data-pos=\"b\"><td>row 32</td></tr>",
+    "<tr data-id=\"r33\" data-pos=\"d\"><td>row 33</td></tr>",
+    "<tr data-id=\"r34\" data-pos=\"e\"><td>row 34</td></tr>",
+    "<tr data-id=\"r35\" data-pos=\"f\"><td>row 35</td></tr>",
+    "<tr data-id=\"r36\" data-pos=\"h\"><td>row 36</td></tr>",
+    "<tr data-id=\"r37\" data-pos=\"i\"><td>row 37</td></tr>",
+    "<tr data-id=\"r38\" data-pos=\"j\"><td>row 38</td></tr>",
+    "<tr data-id=\"r39\" data-pos=\"l\"><td>row 39</td></tr>",
+    "<tr data-id=\"r40\" data-pos=\"m\"><td>row 40</td></tr>",
+    "<tr data-id=\"r41\" data-pos=\"n\"><td>row 41</td></tr>",
+    "<tr data-id=\"r42\" data-pos=\"p\"><td>row 42</td></tr>",
+    "<tr data-id=\"r43\" data-pos=\"q\"><td>row 43</td></tr>",
+    "<tr data-id=\"r44\" data-pos=\"r\"><td>row 44</td></tr>",
+    "<tr data-id=\"r45\" data-pos=\"t\"><td>row 45</td></tr>",
+    "<tr data-id=\"r46\" data-pos=\"u\"><td>row 46</td></tr>",
+    "<tr data-id=\"r47\" data-pos=\"v\"><td>row 47</td></tr>",
+    "<tr data-id=\"r48\" data-pos=\"x\"><td>row 48</td></tr>",
+    "<tr data-id=\"r49\" data-pos=\"y\"><td>row 49</td></tr>",
+    "</tbody><tbody>",
+    "<tr data-id=\"r50\" data-pos=\"z\"><td>row 50</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 2725
+}

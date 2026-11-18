@@ -2,6 +2,7 @@
 //   |normalize-first-keeps|normalize-rekey-all|normalize-content|normalize-slots|normalize-hidden-text
 //   |a1-base26|model-trailing|model-index
 //   |ops-refuse-late|ops-inverse-fmt|ops-inverse-new|ops-covered|ops-batch-atomic|ops-empty-cell|ops-validate-cr|ops-formula-stale
+//   |ops-stale-unknown|ops-stale-batch-member|ops-stale-auto
 //   |rows-tie|rows-exists|rows-inverse-cells|rows-frozen|rows-bad-key|rows-end|rows-formula-guard
 //   |cols-shift|cols-rederive|cols-own-fmt|cols-inverse-cells
 //   |merge-inverse-content|merge-grow|merge-anchor|merge-overlap|merge-cut|freeze-cut|ops-flat-inverse
@@ -147,13 +148,15 @@ export const MUTATIONS = {
     "repair pairs",
     /toBe|toEqual/,
   ),
-  "normalize-content": normalize(
-    "a covered position that holds content is emptied when its merge is undone",
-    "      } else if (covered && covered.hidden) {\n        target.cells[col + j] = uncovered(covered);",
-    "      } else if (covered) {\n        target.cells[col + j] = null;",
-    "repair pairs",
-    /toBe|toEqual/,
-  ),
+  "normalize-content": {
+    what: "a covered position that holds content is emptied when its merge is undone",
+    file: NORMALIZE,
+    find: "      } else if (covered && covered.hidden) {\n        target.cells[col + j] = uncovered(covered);",
+    replace: "      } else if (covered) {\n        target.cells[col + j] = null;",
+    test: "test/grid/grid-repair.test.js",
+    name: "a merge across a row undone for the hidden text under it keeps the other text it covered",
+    expects: /toBe|toEqual/,
+  },
   "normalize-slots": normalize(
     "the plain HTML slot rule is skipped",
     "    if (same || textRows.has(r)) continue;",
@@ -219,7 +222,7 @@ export const MUTATIONS = {
   ),
   "ops-batch-atomic": ops(
     "a refused action in a batch leaves the ones before it applied",
-    "        for (let i = done.length - 1; i >= 0; i--) apply(backing, done[i], { derive, formulas });\n",
+    "        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas });\n",
     "",
     "batch is all or nothing",
     /toBe|toEqual/,
@@ -347,6 +350,33 @@ export const MUTATIONS = {
     "stale",
     /toBe|toEqual/,
   ),
+  "ops-stale-unknown": {
+    what: "a number written under a format no formatter knows leaves the table unmarked in the reducer, so the model backing and the live table disagree",
+    file: OPS,
+    find: "  if (out.out === \"applied\" && leavesWaiting(backing, out.changes.cells)) backing.setStale(true);\n",
+    replace: "",
+    test: "test/grid/stale.test.js",
+    name: "a host writing through the model backing gets the same stale mark and bytes as the live table: marked for a number under a format no formatter knows, not under a known format or none",
+    expects: /toBe|toEqual/,
+  },
+  "ops-stale-batch-member": {
+    what: "each action of a batch is judged on its own, so a batch that shows a number plain between two of its actions marks the table",
+    file: OPS,
+    find: "      const out = each(backing, one, { derive, formulas });\n",
+    replace: "      const out = marked(backing, each(backing, one, { derive, formulas }));\n",
+    test: "test/grid/ops-cells.test.js",
+    name: "a batch judges its stale mark once, on the cells it leaves: a number it shows plain and then clears marks nothing",
+    expects: /toBe|toEqual/,
+  },
+  "ops-stale-auto": {
+    what: "every number shown as its plain value marks the table, under a known format or none too",
+    file: "src/grid/content.js",
+    find: 'return cell?.n === true && cell.v === undefined && fmtKind(fmt) === "unknown";',
+    replace: "return cell?.n === true && cell.v === undefined;",
+    test: "test/grid/stale.test.js",
+    name: "a host writing through the model backing gets the same stale mark and bytes as the live table: marked for a number under a format no formatter knows, not under a known format or none",
+    expects: /toBe|toEqual/,
+  },
   "style-order": styles(
     "styles are written in the order they came in",
     "const ordered = pairs.slice().sort((a, b) => STYLE_PROPERTIES.indexOf(a[0]) - STYLE_PROPERTIES.indexOf(b[0]));",
@@ -554,12 +584,13 @@ export const MUTATIONS = {
     "a format the grid does not know keeps the cell\u0027s text",
     /toBe|toEqual/,
   ),
-  "x-gen-sort": laws(
+  // The mutant crashes the engine on the second record before a law can compare: that counts.
+  "x-gen-sort": { ...laws(
     "a move with several records applies only the first",
     '    if (cut !== null) return cutRefusal(cut);\n  }\n  if (guarded(backing, action, formulas) && movesRows(backing, action)) return engineRefusal();\n  for (const record of action.rows) {',
     '    if (cut !== null) return cutRefusal(cut);\n  }\n  if (guarded(backing, action, formulas) && movesRows(backing, action)) return engineRefusal();\n  for (const record of action.rows.slice(0, 1)) {',
     "reducer laws over seeded lists",
-  ),
+  ), expects: /toBe|toEqual|TypeError/ },
   "x-text-carry": ops(
     "the delete inverse leaves out the text of a cell whose format the grid does not know",
     '    const extra = cellExtra(cell, col);\n    cells.push([row.id, inverseContent(cell), extra]);',
@@ -1095,8 +1126,8 @@ export const MUTATIONS = {
   "speed-batch-untried": speed(
     "a batch nobody tried writes each action with no fits step",
     OPS,
-    "  return applyFitted(backing, action, options, apply);",
-    "  return applyFitted(backing, action, options);",
+    "  return marked(backing, applyFitted(backing, action, options, applyOne));",
+    "  return marked(backing, applyFitted(backing, action, options));",
     "a batch nobody tried still refuses an action whole",
   ),
   "speed-anchor-walk": speed(
@@ -1123,8 +1154,8 @@ export const MUTATIONS = {
   "speed-sound-rewrite": speed(
     "apply writes every batch the long way, with each action tried again",
     OPS,
-    '  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);',
-    '  if (action.t === "batch") return applyUnchecked(backing, action, options);',
+    '  if (action.t === "batch" && !findsRows(backing)) return applyFitted(backing, action, options, applyOne);',
+    '  if (action.t === "batch") return applyFitted(backing, action, options, applyOne);',
     COPIES,
   ),
   "speed-repeated-fits": speed(
@@ -1137,7 +1168,7 @@ export const MUTATIONS = {
   "speed-repeated-apply": speed(
     "apply writes a batch the short way on a sheet that does not find every row",
     OPS,
-    '  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);\n',
+    '  if (action.t === "batch" && !findsRows(backing)) return applyFitted(backing, action, options, applyOne);\n',
     "",
     "a batch that names a row the sheet no longer finds is refused whole, as it was",
   ),

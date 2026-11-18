@@ -1,0 +1,28 @@
+{
+  "name": "repair-orphan",
+  "about": "the repair input orphan lists its issues, and repair gives the bytes of orphan.out.html",
+  "start": {
+    "repair": "orphan"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "hidden_orphan"
+  ],
+  "issues": [],
+  "repaired": "orphan",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"><col data-id=\"c3\" data-pos=\"l\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td>a</td><td>b</td><td>c</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td>d</td><td>e</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 273
+}

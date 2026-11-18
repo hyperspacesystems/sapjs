@@ -78,6 +78,10 @@ function readCol(src, i) {
     col.fmt = readAval(src, i + 6);
     i = cursor;
   }
+  if (flag(src, i, " hidden")) {
+    col.hidden = true;
+    i += 7;
+  }
   if (src.startsWith(' style="width:', i)) {
     col.width = readCount(src, i + 14, 0);
     i = expect(src, cursor, 'px"');
@@ -116,6 +120,10 @@ function readRow(src, i, frozen) {
   row.pos = readAval(src, i);
   i = cursor;
   if (frozen) row.frozen = true;
+  if (flag(src, i, " hidden")) {
+    row.hidden = true;
+    i += 7;
+  }
   if (src.startsWith(' style="', i)) {
     row.style = readAval(src, i + 8);
     i = cursor;

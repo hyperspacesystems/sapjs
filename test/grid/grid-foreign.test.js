@@ -143,6 +143,14 @@ test("a page undo of a whole-column format is taken in by the next command when 
   expect([page.td(1, 2).outerHTML, page.td(2, 2).textContent, page.bytes()]).toEqual(['<td n="" f="=B2/B$5" v="0.8">80%</td>', "20%", start.replace("<td>Rent</td>", "<td>Lease</td>")]);
 });
 
+test("a write from outside the grid that puts other text and another v in a formatted cell is read as the text", () => {
+  const page = live(table(['<td n v="1200" fmt="$#,##0.00">$1,200.00</td>']));
+  page.td(0, 0).setAttribute("v", "5");
+  page.td(0, 0).textContent = "hello";
+  page.grid.foreignWrite([page.td(0, 0)]);
+  expect([page.grid.get("A1"), page.td(0, 0).hasAttribute("v")]).toEqual(["hello", false]);
+});
+
 test("a write from outside the grid that also changes a column gets the cell's derived parts put right", () => {
   const page = live(table(['<td n v="1200" fmt="$#,##0.00">$1,200.00</td>']));
   page.table.querySelector("col").setAttribute("style", "width:140px");

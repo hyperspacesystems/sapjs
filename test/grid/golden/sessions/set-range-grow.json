@@ -1,0 +1,94 @@
+{
+  "name": "set-range-grow",
+  "about": "a block past the sheet is refused without grow and brings its rows and columns with it",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "setRange",
+      "C5",
+      [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "1",
+          "2",
+          "3"
+        ],
+        [
+          "x",
+          "y",
+          "z"
+        ]
+      ]
+    ],
+    [
+      "setRange",
+      "C5",
+      [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "1",
+          "2",
+          "3"
+        ],
+        [
+          "x",
+          "y",
+          "z"
+        ]
+      ],
+      {
+        "grow": true
+      }
+    ],
+    [
+      "set",
+      "A10",
+      "far",
+      {
+        "grow": true
+      }
+    ],
+    [
+      "set",
+      "A10011",
+      "too far",
+      {
+        "grow": true
+      }
+    ]
+  ],
+  "outcomes": [
+    "refused outside_sheet",
+    "change",
+    "change",
+    "refused too_large"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"><col data-id=\"cs2\" data-pos=\"p\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"><td></td><td></td><td>a</td><td>b</td><td>c</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"><td></td><td></td><td n>1</td><td n>2</td><td n>3</td></tr>",
+    "<tr data-id=\"rs1\" data-pos=\"p\"><td></td><td></td><td>x</td><td>y</td><td>z</td></tr>",
+    "<tr data-id=\"rs3\" data-pos=\"s\"></tr>",
+    "<tr data-id=\"rs4\" data-pos=\"v\"></tr>",
+    "<tr data-id=\"rs5\" data-pos=\"y\"><td>far</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 740
+}

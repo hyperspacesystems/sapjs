@@ -7,7 +7,7 @@ import { modelBacking } from "./backing-model.js";
 import { isKey } from "./codec/order-keys.js";
 import { isCanonicalStyle, STYLE_PROPERTIES } from "./codec/styles.js";
 import { canonStyle, cleanDeclaration, declarationProperty, isMixedStyle, mixedNext, splitDeclarations } from "./styles.js";
-import { effectiveFmt } from "./content.js";
+import { effectiveFmt, waitsForFormatter } from "./content.js";
 import { derivePlain } from "./derive-plain.js";
 import { isBuiltin } from "./format.js";
 import { typed } from "./codec/value.js";
@@ -231,7 +231,7 @@ function checkRowRecords(action) {
   action.rows.forEach((record, index) => {
     if (record === null || typeof record !== "object" || Array.isArray(record)) bad(`rows[${index}] is a record`);
     for (const key of Object.keys(record)) if (!ROW_FIELDS.includes(key)) bad(`${key} is not a field of a rows record`);
-    if (record.hidden !== undefined) bad("hidden rows wait for step X1");
+    if (record.hidden !== undefined && !(insert && record.hidden === true)) bad("a row is hidden only as an undo puts it back: hiding waits for step X2");
     checkId(record.id, `rows[${index}] id`);
     if (insert || record.pos !== undefined) checkKey(record.pos, `rows[${index}].pos`);
     if (record.height !== undefined) checkHeight(record.height, `rows[${index}].height`, !insert);
@@ -276,7 +276,7 @@ function checkColRecords(action) {
   action.cols.forEach((record, index) => {
     if (record === null || typeof record !== "object" || Array.isArray(record)) bad(`cols[${index}] is a record`);
     for (const key of Object.keys(record)) if (!COL_FIELDS.includes(key)) bad(`${key} is not a field of a cols record`);
-    if (record.hidden !== undefined) bad("hidden columns wait for step X1");
+    if (record.hidden !== undefined && !(insert && record.hidden === true)) bad("a column is hidden only as an undo puts it back: hiding waits for step X2");
     checkId(record.id, `cols[${index}] id`);
     if (insert || record.pos !== undefined) checkKey(record.pos, `cols[${index}].pos`);
     if (record.width !== undefined) checkWidth(record.width, `cols[${index}].width`, !insert);
@@ -982,6 +982,7 @@ function recordOf(row, cols) {
   const record = { id: row.id, pos: row.pos };
   if (row.style !== undefined) record.style = row.style;
   if (row.frozen === true) record.frozen = true;
+  if (row.hidden === true) record.hidden = true;
   const cells = [];
   row.cells.forEach((cell, c) => {
     if (!cell || cell.hidden) return;
@@ -996,6 +997,7 @@ function recordOfCol(col, rows, at) {
   const record = { id: col.id, pos: col.pos };
   if (col.width !== undefined) record.width = col.width;
   if (col.fmt !== undefined) record.fmt = col.fmt;
+  if (col.hidden === true) record.hidden = true;
   const cells = [];
   rows.forEach((row) => {
     const cell = row.cells[at] ?? null;
@@ -1031,7 +1033,7 @@ function writeInsert(backing, action, { derive, formulas }) {
     }
 
     const style = record.height !== undefined ? withHeight(record.style, record.height) : record.style;
-    backing.insertRow(at, { id: record.id, pos: record.pos, style });
+    backing.insertRow(at, { id: record.id, pos: record.pos, ...(record.hidden === true ? { hidden: true } : {}), style });
     if (record.frozen === true || at < frozen) backing.setFrozen({ rows: frozen + 1 });
     rows.push({ sheet: action.sheet, row: record.id, kind: "insert" });
     for (const box of grown) growMergeRows(backing, action, box, at, cells);
@@ -1662,7 +1664,7 @@ export function fits(backing, action, { formulas = null } = {}) {
   if (action.t !== "batch") return fitOne(backing, action, { formulas });
   const scratch = modelBacking(snapshot(backing.sheet), { sheetId: backing.sheetId });
   if (!findsRows(backing)) {
-    const out = applyUnchecked(scratch, action, { derive: trial, formulas });
+    const out = applyFitted(scratch, action, { derive: trial, formulas }, applyOne);
     return out.out === "applied" ? true : { code: out.code, detail: out.detail };
   }
   for (const one of action.actions) {
@@ -1679,6 +1681,12 @@ export function fits(backing, action, { formulas = null } = {}) {
 }
 
 export function apply(backing, action, options = {}) {
+  return marked(backing, asOneStep(backing, action, () => applyOne(backing, action, options)));
+}
+
+// The write as `apply` makes it, without the stale mark for a number left waiting for a formatter:
+// a batch writes each of its actions this way, and its cells are judged once all of them are in.
+function applyOne(backing, action, options = {}) {
   let fitted;
   try {
     fitted = fits(backing, action, { formulas: options.formulas ?? null });
@@ -1687,8 +1695,36 @@ export function apply(backing, action, options = {}) {
     throw err;
   }
   if (fitted !== true) return refusal(fitted.code, fitted.detail);
-  if (action.t === "batch" && !findsRows(backing)) return applyUnchecked(backing, action, options);
+  if (action.t === "batch" && !findsRows(backing)) return applyFitted(backing, action, options, applyOne);
   return applyFitted(backing, action, options);
+}
+
+// A batch is one undo step. In a live table a write that is not an edit (a cell redrawn under its
+// column's new format, a formula's shown result) leaves no record for an undo, so beside an edit
+// to the same cell in the same step an undo would put the cell back wrong: there every cell write
+// of the batch, its rollback too, is an edit (`loudly`, which the model backing does not need).
+const asOneStep = (backing, action, run) => (action?.t === "batch" && backing.loudly ? backing.loudly(run) : run());
+
+// A number the write leaves showing its plain value under a format no formatter knows waits for a
+// formatter: the table says so, the same in every backing (plan 4.9). It is judged on the cells as
+// the whole action leaves them, because a batch can show one plain between two of its actions, as
+// the undo of a column format does.
+function marked(backing, out) {
+  if (out.out === "applied" && leavesWaiting(backing, out.changes.cells)) backing.setStale(true);
+  return out;
+}
+
+// Whether a cell a write changed is left waiting for a formatter.
+function leavesWaiting(backing, changes) {
+  if (changes.length === 0) return false;
+  const cols = backing.cols();
+  return changes.some((change) => {
+    const r = backing.rowIndex(change.row);
+    const c = backing.colIndex(change.col);
+    if (r < 0 || c < 0) return false;
+    const cell = backing.cell(r, c);
+    return waitsForFormatter(cell, effectiveFmt(cell, cols[c]));
+  });
 }
 
 // The inverses of a batch's actions, last first. An inverse that is itself a batch is spliced in, so
@@ -1697,7 +1733,7 @@ const flatInverse = (done) => done.slice().reverse().flatMap((inverse) => (inver
 
 // The same write without the fits step, for the tests that must reach the batch rollback.
 export function applyUnchecked(backing, action, options) {
-  return applyFitted(backing, action, options, apply);
+  return marked(backing, applyFitted(backing, action, options, applyOne));
 }
 
 // The write. `each` writes one action of a batch: a batch that fits has tried whole needs no fits
@@ -1713,7 +1749,7 @@ function applyFitted(backing, action, { derive, formulas = null } = {}, each = a
     for (const one of action.actions) {
       const out = each(backing, one, { derive, formulas });
       if (out.out !== "applied") {
-        for (let i = done.length - 1; i >= 0; i--) apply(backing, done[i], { derive, formulas });
+        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas });
         return refusal(out.code, out.detail);
       }
       done.push(out.inverse);

@@ -1,0 +1,30 @@
+{
+  "name": "repair-plain-colspan",
+  "about": "the repair input plain-colspan lists its issues, and repair gives the bytes of plain-colspan.out.html",
+  "start": {
+    "repair": "plain-colspan"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "merge_uncovered",
+    "merge_uncovered"
+  ],
+  "issues": [],
+  "repaired": "plain-colspan",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"><col data-id=\"c3\" data-pos=\"l\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td colspan=\"2\">Head</td><td hidden></td><td>Note</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"V\"><td rowspan=\"2\">Tall</td><td>B</td><td>C</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"l\"><td hidden></td><td>D</td><td>E</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 394
+}

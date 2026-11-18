@@ -86,16 +86,24 @@ afterEach(() => {
 
 // A backing over a table, and the counts a test reads: the mutation records made by ordinary
 // writes (`seen`), the ones made inside `write` (`paused`), how many times `write` ran (`pauses`)
-// and how many rows a paused write put somewhere (`moved`). A paused write makes no row, so
-// each row it adds to a part is a row it moved. `write` works as the plugin kit's does on a page
-// with no mutation hub. `records()` returns the counts since the last call.
+// and how many rows a write took out of one part and put in another or in the same part again
+// (`moved`), paused or not. `write` works as the plugin kit's does on a page with no mutation
+// hub. `records()` returns the counts since the last call.
 function watch(table, options) {
   const observer = new MutationObserver(() => {});
   observer.observe(table, { childList: true, subtree: true, attributes: true, characterData: true });
   observers.push(observer);
   let counts = { ...NONE };
+  let lifted = new Set();
+  const count = (made) => {
+    for (const record of made) {
+      for (const node of record.removedNodes) if (node.localName === "tr") lifted.add(node);
+      for (const node of record.addedNodes) if (node.localName === "tr" && lifted.delete(node)) counts.moved += 1;
+    }
+    return made.length;
+  };
   const settle = () => {
-    counts.seen += observer.takeRecords().length;
+    counts.seen += count(observer.takeRecords());
   };
   const write = (fn) => {
     settle();
@@ -103,9 +111,7 @@ function watch(table, options) {
     try {
       return fn();
     } finally {
-      const made = observer.takeRecords();
-      counts.paused += made.length;
-      for (const record of made) for (const node of record.addedNodes) if (node.localName === "tr") counts.moved += 1;
+      counts.paused += count(observer.takeRecords());
     }
   };
   const backing = domBacking(table, { write, ...options });
@@ -113,6 +119,7 @@ function watch(table, options) {
     settle();
     const out = counts;
     counts = { ...NONE };
+    lifted = new Set();
     return out;
   };
   return { table, backing, records };
@@ -190,7 +197,7 @@ test("an inserted, removed or moved row is where the writer puts it", () => {
   twin.page.records();
 
   both(twin, "moveRow", 0, 7);
-  expect(twin.page.records()).toEqual({ ...NONE, seen: 2 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 2, moved: 1 });
   both(twin, "moveRow", 7, 0);
   both(twin, "moveRow", 2, 5);
   both(twin, "moveRow", 5, 2);
@@ -287,11 +294,12 @@ test("the tbody groups are cut where the writer cuts them", () => {
   const twin = pair(longSheet(100, 2));
   expect(parts(twin.table)).toEqual(["colgroup 3", "thead 2", "tbody 50", "tbody 48"]);
 
-  // A row put first moves the last row of its group into the next one, as a derived write.
+  // A row put first moves the last row of its group into the next one, as an ordinary write, so
+  // an undo of the insert puts it back.
   both(twin, "insertRow", 2, { id: "a", pos: "A" });
   expect(parts(twin.table)).toEqual(["colgroup 3", "thead 2", "tbody 50", "tbody 49"]);
   expect(rowIds(twin.table.tBodies[1])[0]).toBe("r51");
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 2, pauses: 1, moved: 1 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 3, moved: 1 });
 
   // A row put last fills its group and moves no row.
   both(twin, "insertRow", 101, { id: "b", pos: "B" });
@@ -315,13 +323,13 @@ test("the tbody groups are cut where the writer cuts them", () => {
   // A removed row is made up for from the next group.
   both(twin, "removeRow", 2);
   expect(parts(twin.table)).toEqual(["colgroup 3", "thead 2", "tbody 50", "tbody 49"]);
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 2, pauses: 1, moved: 1 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 3, moved: 1 });
 
   // A row moved from the last group to the first, and back.
   chain(twin, [["moveRow", 100, 2], ["setFrozen", { rows: 2 }]]);
   expect(parts(twin.table)).toEqual(["colgroup 3", "thead 2", "tbody 50", "tbody 49"]);
   expect(rowIds(twin.table.tBodies[0])[0]).toBe("b");
-  expect(twin.page.records()).toEqual({ seen: 2, paused: 2, pauses: 1, moved: 1 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 4, moved: 2 });
   chain(twin, [["moveRow", 2, 100], ["setFrozen", { rows: 2 }]]);
   expect(rowIds(twin.table.tBodies[1])[48]).toBe("b");
   twin.page.records();
@@ -330,7 +338,8 @@ test("the tbody groups are cut where the writer cuts them", () => {
   // rows that enter it pull them back.
   both(twin, "setFrozen", { rows: 0 });
   expect(parts(twin.table)).toEqual(["colgroup 3", "tbody 50", "tbody 50", "tbody 1"]);
-  expect(twin.page.records().moved).toBe(3);
+  // Two rows that leave the thead, and three rows the groups pass on.
+  expect(twin.page.records().moved).toBe(5);
   both(twin, "setFrozen", { rows: 1 });
   expect(parts(twin.table)).toEqual(["colgroup 3", "thead 1", "tbody 50", "tbody 50"]);
   both(twin, "setFrozen", { rows: 60 });
@@ -353,18 +362,18 @@ test("an insert at the top of a 1,000 row sheet moves one row across each later 
 
   both(twin, "insertRow", 0, { id: "top", pos: "0" });
   expect(parts(twin.table)).toEqual(["colgroup 1", ...full, "tbody 1"]);
-  // One record for the new row. Paused: twenty rows moved, two records each, and the new tbody.
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 41, pauses: 1, moved: 20 });
+  // One record for the new row, then twenty rows moved, two records each, and the new tbody.
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 42, moved: 20 });
 
   // A row put in the eleventh group moves a row across the ten cuts after it.
   both(twin, "insertRow", 525, { id: "mid", pos: "1" });
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 20, pauses: 1, moved: 10 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 21, moved: 10 });
   both(twin, "removeRow", 525);
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 20, pauses: 1, moved: 10 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 21, moved: 10 });
 
   both(twin, "removeRow", 0);
   expect(parts(twin.table)).toEqual(["colgroup 1", ...full]);
-  expect(twin.page.records()).toEqual({ seen: 1, paused: 41, pauses: 1, moved: 20 });
+  expect(twin.page.records()).toEqual({ ...NONE, seen: 42, moved: 20 });
   expect(firstDifference(twin.dom.bytes(), tableHtml(start))).toBeNull();
 
   // A frozen row moves no data row.
@@ -633,7 +642,9 @@ test("read takes the table's parts as they are now", () => {
   long.page.records();
   both(long, "insertRow", 100, { id: "a", pos: "z" });
   expect(parts(long.table)).toEqual(["colgroup 3", "tbody 50", "tbody 50", "tbody 1"]);
-  expect(long.page.records().seen).toBe(1);
+  // The foreign layout is put right as one derived write; the new row and the group it opens are
+  // ordinary writes.
+  expect(long.page.records()).toEqual({ seen: 4, paused: 101, pauses: 1, moved: 51 });
 });
 
 test("rowIndexOf finds the row that holds a node", () => {

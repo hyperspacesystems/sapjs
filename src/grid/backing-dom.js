@@ -4,10 +4,10 @@
 //
 // The backing makes two kinds of DOM write. A write that changes a cell's content or one of its
 // format fields (fmt, style, span), a row or column record, or which rows are frozen is an
-// ordinary DOM write, so the page's change bridge, its autosave and its undo see the edit. A
-// write of derived parts only (the shown text, n, t, v, the table's stale mark, and the moves
-// that keep the tbody groups the writer's) runs inside the `write` function handed in, which is
-// the plugin kit's `write`, so it never looks like an edit.
+// ordinary DOM write, so the page's change bridge, its autosave and its undo see the edit. So are
+// the moves that keep the tbody groups the writer's, so an undo puts rows back in their groups. A
+// write of derived parts only (the shown text, n, t, v and the table's stale mark) runs inside the
+// `write` function handed in, which is the plugin kit's `write`, so it never looks like an edit.
 //
 // After every row primitive the table's parts are the ones the writer writes: the frozen rows in
 // one thead that is there only while a row is frozen, and every other row in tbody groups cut
@@ -22,7 +22,9 @@
 
 import { modelBacking } from "./backing-model.js";
 import { canonicalGrid, domAdapter, treeModel } from "./codec/canonical.js";
-import { contentOf } from "./content.js";
+import { groupStarts } from "./codec/write.js";
+import { contentOf, effectiveFmt } from "./content.js";
+import { fmtKind } from "./format.js";
 
 // A cell's fields as attributes, in the writer's order. A flag is an attribute with no value.
 const ATTRIBUTES = ["n", "t", "f", "v", "fmt", "colspan", "rowspan", "hidden", "style"];
@@ -30,8 +32,8 @@ const FLAGS = new Set(["n", "t", "hidden"]);
 const CELL_FIELDS = ["text", ...ATTRIBUTES];
 const FORMAT_FIELDS = ["fmt", "colspan", "rowspan", "hidden", "style"];
 const SPAN_FIELDS = ["colspan", "rowspan", "hidden"];
-const ROW_FIELDS = ["id", "pos", "frozen", "style"];
-const COL_FIELDS = ["id", "pos", "fmt", "width"];
+const ROW_FIELDS = ["id", "pos", "frozen", "hidden", "style"];
+const COL_FIELDS = ["id", "pos", "fmt", "hidden", "width"];
 const BLANK = { text: "" };
 const GROUP = 50;
 
@@ -69,10 +71,15 @@ function setAttribute(node, name, value) {
 }
 
 // The element is made what a parser builds from the cell's canonical bytes: these attributes with
-// these values, and the text as one text node. Markup inside the cell is reduced to its text.
+// these values, and the text as one text node. Markup inside the cell is reduced to its text. A
+// cell that holds one text node keeps it and takes new text as its data, so an undo record that
+// names the node, kept from an edit before, still finds it there.
 function paint(td, cell) {
   for (const name of ATTRIBUTES) setAttribute(td, name, attributeOf(cell, name));
-  if (td.textContent !== cell.text || td.firstElementChild !== null) td.textContent = cell.text;
+  const only = td.firstChild;
+  if (only !== null && only === td.lastChild && only.nodeType === only.TEXT_NODE && cell.text !== "") {
+    if (only.data !== cell.text) only.data = cell.text;
+  } else if (td.textContent !== cell.text || td.firstElementChild !== null) td.textContent = cell.text;
 }
 
 // The cell element at index c, or null when the row ends before it. With `pad`, a row that ends
@@ -112,6 +119,7 @@ function rowElement(doc, row) {
   const tr = doc.createElement("tr");
   tr.setAttribute("data-id", row.id);
   tr.setAttribute("data-pos", row.pos);
+  if (row.hidden) tr.setAttribute("hidden", "");
   if (row.style !== undefined) tr.setAttribute("style", row.style);
   for (const cell of row.cells) paint(tr.appendChild(doc.createElement("td")), cell ?? BLANK);
   return tr;
@@ -124,16 +132,9 @@ function colElement(doc, col) {
   el.setAttribute("data-id", col.id);
   el.setAttribute("data-pos", col.pos);
   if (col.fmt !== undefined) el.setAttribute("fmt", col.fmt);
+  if (col.hidden) el.setAttribute("hidden", "");
   if (col.width !== undefined) el.setAttribute("style", widthOf(col.width));
   return el;
-}
-
-// The index at which the writer starts each tbody among these data rows. A copy of the writer's
-// rule, kept here until the codec exports its own.
-function groupStarts(rows, size) {
-  const starts = [0];
-  for (let at = size; at < rows.length; at += size) starts.push(at);
-  return starts;
 }
 
 // The table's parts as the tree reader walks them. The rows are in its order: the rows of every
@@ -252,14 +253,38 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
 
   const inTable = (tr) => tr.parentNode !== null && (tr.parentNode === table || tr.parentNode.parentNode === table);
 
+  // Inside `loudly(fn)` every cell write is drawn as an edit, so an undo puts it back.
+  let loud = 0;
+  function loudly(fn) {
+    loud += 1;
+    try {
+      return fn();
+    } finally {
+      loud -= 1;
+    }
+  }
+
   function putCell(r, c, cell) {
     const next = cell ?? null;
     const old = mirror.cell(r, c);
     if (sameCell(old, next)) return;
     mirror.putCell(r, c, next);
     const draw = () => drawCell(trs[r], c, next);
-    if (isEdit(old, next)) draw();
+    if (loud > 0 || isEdit(old, next) || (ownText.has(old) && old.text !== (next?.text ?? ""))) draw();
     else write(draw);
+    if ((old?.rowspan ?? 1) !== (next?.rowspan ?? 1)) settle();
+  }
+
+  // The cells under a column whose format no formatter knows, taken when the column's format
+  // changes: their text came from no formatter the sheet has, so writing over it is an edit, which
+  // an undo puts back. A cell leaves the set when it is written again.
+  const ownText = new WeakSet();
+  function takeOwnText(c) {
+    const column = mirror.cols()[c];
+    mirror.rows().forEach((row, r) => {
+      const held = mirror.cell(r, c);
+      if (held !== null && held.hidden !== true && fmtKind(effectiveFmt(held, column)) === "unknown") ownText.add(held);
+    });
   }
 
   function setStale(flag) {
@@ -359,10 +384,12 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     }
   }
 
-  // A row primitive ends with the groups put right, as a derived write when there is one to make.
+  // A row primitive ends with the groups put right. The group moves are written beside the row
+  // edit, not as a derived write, so an undo of the edit's DOM records reverses them in the exact
+  // inverse order of the row's removal and placement.
   const settle = () => {
     const starts = cuts();
-    if (!grouped(starts)) write(() => regroup(starts));
+    if (!grouped(starts)) regroup(starts);
   };
 
   // Puts a row element that is not in the list where the row at index r goes: before the row
@@ -423,6 +450,7 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     const tr = trs[r];
     if ("id" in fields) setAttribute(tr, "data-id", textOf(fields.id));
     if ("pos" in fields) setAttribute(tr, "data-pos", textOf(fields.pos));
+    if ("hidden" in fields) setAttribute(tr, "hidden", fields.hidden ? "" : null);
     if ("style" in fields) setAttribute(tr, "style", textOf(fields.style));
     if (!("frozen" in fields)) return;
     const data = mirror.rows().findIndex((row) => row.frozen !== true);
@@ -457,10 +485,13 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     colEls.splice(c, 0, el);
   }
 
-  // A row that reaches the new column gets an empty cell there. A shorter row has none to move.
+  // A row that reaches the new column gets an empty cell there. A shorter row has none to move. A
+  // column added after the last one moves no cell: a row that already reaches it, which only a
+  // table that needs repair has, keeps its next cell there as the new column's.
   function insertCol(c, record) {
     const col = mirror.insertCol(c, record);
     placeCol(colElement(doc, col), c);
+    if (c === colEls.length - 1) return col;
     for (const row of trs) {
       const td = cellAt(row, c, false);
       if (td !== null) row.insertBefore(doc.createElement("td"), td);
@@ -468,25 +499,31 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     return col;
   }
 
+  // A removed cell that spanned rows can end the merge that kept a group longer than 50 rows.
   function removeCol(c) {
     const record = mirror.removeCol(c);
     colEls[c].remove();
     colEls.splice(c, 1);
+    let spanned = false;
     for (const row of trs) {
       const td = cellAt(row, c, false);
       if (td === null) continue;
+      if (Number(td.getAttribute("rowspan") ?? 1) > 1) spanned = true;
       td.remove();
       trimRow(row);
     }
+    if (spanned) settle();
     return record;
   }
 
   function putCol(c, fields) {
+    if ("fmt" in fields) takeOwnText(c);
     mirror.putCol(c, fields);
     const el = colEls[c];
     if ("id" in fields) setAttribute(el, "data-id", textOf(fields.id));
     if ("pos" in fields) setAttribute(el, "data-pos", textOf(fields.pos));
     if ("fmt" in fields) setAttribute(el, "fmt", textOf(fields.fmt));
+    if ("hidden" in fields) setAttribute(el, "hidden", fields.hidden ? "" : null);
     if ("width" in fields) setAttribute(el, "style", widthOf(fields.width));
   }
 
@@ -605,6 +642,7 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     hasFormula: () => mirror.hasFormula(),
     cell: (r, c) => mirror.cell(r, c),
     putCell,
+    loudly,
     insertRow,
     removeRow,
     putRow,
@@ -621,5 +659,6 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     rescan,
     tidy,
     rowIndexOf,
+    rowAt: (r) => trs[r] ?? null,
   };
 }

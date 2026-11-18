@@ -93,6 +93,7 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
     insertRow(r, record) {
       const row = { id: record.id, pos: record.pos, cells: (record.cells ?? []).map(copyCell) };
       if (record.frozen !== undefined) row.frozen = record.frozen;
+      if (record.hidden === true) row.hidden = true;
       if (record.style !== undefined) row.style = record.style;
       trim(row.cells);
       const fresh = distinct && !rowIds.has(row.id);
@@ -115,7 +116,7 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
     },
 
     putRow(r, fields) {
-      putFields(store.rows[r], fields, ["id", "pos", "frozen", "style"]);
+      putFields(store.rows[r], fields, ["id", "pos", "frozen", "hidden", "style"]);
       if ("id" in fields || !distinct) indexRows();
     },
 
@@ -126,13 +127,15 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
       else indexRows();
     },
 
+    // A column added after the last one moves no cell, as the DOM backing's does.
     insertCol(c, record) {
       const col = { id: record.id, pos: record.pos };
       if (record.fmt !== undefined) col.fmt = record.fmt;
+      if (record.hidden === true) col.hidden = true;
       if (record.width !== undefined) col.width = record.width;
       store.cols.splice(c, 0, col);
       indexCols();
-      for (const row of store.rows) if (row.cells.length > c) row.cells.splice(c, 0, null);
+      if (c < store.cols.length - 1) for (const row of store.rows) if (row.cells.length > c) row.cells.splice(c, 0, null);
       return col;
     },
 
@@ -149,7 +152,7 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
     },
 
     putCol(c, fields) {
-      putFields(store.cols[c], fields, ["id", "pos", "fmt", "width"]);
+      putFields(store.cols[c], fields, ["id", "pos", "fmt", "hidden", "width"]);
       indexCols();
     },
 

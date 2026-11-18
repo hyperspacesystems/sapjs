@@ -1,0 +1,49 @@
+{
+  "name": "repair-agent-table",
+  "about": "an agent's table with header cells, no ids and plain spans is repaired with every value in the column a browser shows it in",
+  "start": {
+    "html": "<table grid>\n<tr><th>Item</th><th>Qty</th><th>Note</th></tr>\n<tr><td colspan=\"2\">Totals</td><td>checked</td></tr>\n<tr><td rowspan=\"2\">Box</td><td>3</td><td>a</td></tr>\n<tr><td>4</td><td>b</td></tr>\n</table>"
+  },
+  "commands": [
+    [
+      "repair"
+    ],
+    [
+      "set",
+      "C4",
+      "c"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change"
+  ],
+  "startIssues": [
+    "row_id_missing",
+    "row_id_missing",
+    "row_id_missing",
+    "row_id_missing",
+    "row_pos_invalid",
+    "row_pos_invalid",
+    "row_pos_invalid",
+    "row_pos_invalid",
+    "row_too_long",
+    "row_too_long",
+    "row_too_long",
+    "row_too_long",
+    "merge_past_end",
+    "merge_past_end"
+  ],
+  "issues": [],
+  "agent": true,
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"><col data-id=\"c2\" data-pos=\"V\"><col data-id=\"c3\" data-pos=\"l\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td>Item</td><td>Qty</td><td>Note</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td colspan=\"2\">Totals</td><td hidden></td><td>checked</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"V\"><td rowspan=\"2\">Box</td><td n>3</td><td>a</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"l\"><td hidden></td><td n>4</td><td>c</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 476
+}

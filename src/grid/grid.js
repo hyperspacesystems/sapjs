@@ -41,7 +41,7 @@ import {
 import { checkSheet } from "./check.js";
 import { QueryRefused } from "./codec/read.js";
 import { cellValue, shown, typed } from "./codec/value.js";
-import { adoptFmt, contentOf, derive, effectiveFmt } from "./content.js";
+import { adoptFmt, contentOf, derive, effectiveFmt, waitsForFormatter } from "./content.js";
 import { DelimitedError, parseDelimited, protectField, writeDelimited } from "./csv.js";
 import { serial } from "./dates.js";
 import { fmtKind } from "./format.js";
@@ -130,6 +130,10 @@ const rekeys = (action, t) => (action?.t === "batch" ? Array.isArray(action.acti
 // becomes U+FFFD.
 const plain = (text) => parseInput(text, { fmt: "@" }).content ?? "";
 
+// A field without the apostrophe an export with `protect` put before its text: one that
+// protectField would put there. Any other apostrophe is part of the text.
+const unprotected = (field) => (field.startsWith("'") && protectField(field.slice(1)) === field ? field.slice(1) : field);
+
 // An item of a block that is not typed text, with its text and its formula made plain.
 function cleaned(item) {
   if (item === null || typeof item !== "object") return item;
@@ -170,29 +174,38 @@ function explains(cell, fmt) {
   return (cell.f === undefined ? derive(value, fmt) : derive({ f: cell.f }, fmt, value))?.text === cell.text;
 }
 
-// The cell a write from outside the grid leaves, with its derived parts put right. The text wins:
-// a `v` the write left as it was while it changed the text goes when it no longer gives that text
-// under the cell's format, so text typed over a number is read as typed, while an undo of a
-// format change, which puts the old text and format back beside the same `v`, keeps the number.
-// A format no formatter knows, built in or added, cannot be checked: there the cell keeps its text
-// as written while a `v` holds its number, and a `v` left beside new text in the same format goes.
-function settled(before, after, column) {
-  if (after === null || after.hidden === true) return after;
-  const cell = { ...after };
-  const fmt = effectiveFmt(cell, column);
-  const known = fmtKind(fmt) !== "unknown";
-  if (cell.v !== undefined && cell.v === before?.v && cell.text !== (before?.text ?? "") && (known ? !explains(cell, fmt) : cell.fmt === before?.fmt)) delete cell.v;
-  if (!known && cell.v !== undefined) return cell;
+// The cell in normal form under this format: its derived parts made again from its content, or a
+// formula's from its stored result, with its own format fields kept.
+function normal(cell, fmt) {
   const result = cell.f !== undefined ? typed(cell.v ?? cell.text, cell.t === true) : undefined;
   const next = { ...(derive(contentOf(cell), fmt, result) ?? { text: "" }) };
   for (const key of ["fmt", "colspan", "rowspan", "style"]) if (cell[key] !== undefined) next[key] = cell[key];
   return blank(next) ? null : next;
 }
 
+// The cell a write from outside the grid leaves, with its derived parts put right. The text wins:
+// when the write changed the text, a `v` that does not give that text under the cell's format goes,
+// so text typed over a number is read as typed, while an undo of a format change, which puts the
+// old text and format back beside the same `v`, keeps the number. That holds for a `v` the write
+// changed too: other text beside another `v` that does not give it is read as the text.
+// A format no formatter knows, built in or added, cannot be checked: there the cell keeps its text
+// as written while a `v` holds its number, and a `v` left as it was beside new text under the same
+// format, the cell's own or the column it was under (`beforeColumn`), goes.
+function settled(before, after, column, beforeColumn = column) {
+  if (after === null || after.hidden === true) return after;
+  const cell = { ...after };
+  const fmt = effectiveFmt(cell, column);
+  const known = fmtKind(fmt) !== "unknown";
+  if (cell.v !== undefined && cell.text !== (before?.text ?? "") && (known ? !explains(cell, fmt) : cell.v === before?.v && fmt === effectiveFmt(before, beforeColumn))) delete cell.v;
+  if (!known && cell.v !== undefined) return cell;
+  return normal(cell, fmt);
+}
+
 // The Grid of a <table grid>. Options: `write(fn)` runs fn as a write that is not an edit (the
 // plugin kit's `write`); `mayWrite(table)` says whether the page may write (the kit's
 // `mayWrite`); `schedule(table)` asks for a pass after a write; `newId(prefix)` mints record
-// ids; `today()` gives today's serial day, for typed dates and the editor text of a date.
+// ids; `today()` gives today's serial day, for typed dates and the editor text of a date. Loading
+// writes nothing, except the stale refresh on a table marked stale.
 export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday } = {}) {
   if (table?.localName !== "table" || !table.hasAttribute("grid")) throw new TypeError("createGrid takes a <table grid> element");
   const known = grids.get(table);
@@ -222,7 +235,50 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     return emit({ source: "dom", ...event });
   }
 
-  const whole = () => fromDom({ rescanned: true, structure: true, cells: [], rows: noRecords(), cols: noRecords() });
+  // A whole read that found the table changed: one change event with source "dom", which names
+  // no cell because any of them may have changed, then the stale refresh.
+  function whole() {
+    const event = fromDom({ rescanned: true, structure: true, cells: [], rows: noRecords(), cols: noRecords() });
+    refresh();
+    return event;
+  }
+
+  // The stale refresh, on a table marked stale whose sheet has no issues: at load, after each
+  // whole read and after a repair. Each value cell under a format a formatter knows is written
+  // again from its value and its format, as writes that are not edits. A formula cell is left as
+  // it is: no engine has calculated it again, so its stored result may be out of date. A cell
+  // under a format no formatter knows keeps its text. The mark goes only when nothing is left
+  // waiting: no formula cell, and no number under a format no formatter knows that shows its plain
+  // value. One change event with source "derived" when a cell changed; it leaves the revision, so
+  // opening a file never causes a save by itself. Returns that event, or null.
+  function refresh() {
+    if (backing.sheet.stale !== true || issues.length > 0) return null;
+    const cols = backing.cols();
+    const changes = [];
+    let waiting = false;
+    backing.rows().forEach((row, r) => {
+      cols.forEach((column, c) => {
+        const cell = backing.cell(r, c);
+        if (cell === null || cell.hidden === true) return;
+        if (cell.f !== undefined) {
+          waiting = true;
+          return;
+        }
+        const look = effectiveFmt(cell, column);
+        if (fmtKind(look) === "unknown") {
+          if (waitsForFormatter(cell, look)) waiting = true;
+          return;
+        }
+        const next = normal(cell, look);
+        if (!sameFields(cell, next, CELL_FIELDS)) changes.push({ r, c, row, column, cell, next });
+      });
+    });
+    if (changes.length > 0) write(() => changes.forEach(({ r, c, next }) => backing.putCell(r, c, next)));
+    if (!waiting) backing.setStale(false);
+    if (changes.length === 0) return null;
+    const cells = changes.map(({ row, column, cell, next }) => ({ row: row.id, col: column.id, before: contentOf(cell), after: contentOf(next) }));
+    return emit({ source: "derived", structure: false, cells, rows: noRecords(), cols: noRecords() });
+  }
 
   // The saved cell at these indexes, or null past the sheet's last row or column.
   const cellAt = (r, c) => (r < backing.rows().length && c < backing.cols().length ? backing.cell(r, c) : null);
@@ -324,7 +380,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
         const after = backing.cell(r, c);
         const redrawn = old.cols[oc].fmt !== column.fmt && after?.fmt === undefined;
         if (!redrawn && sameFields(before, after, CELL_FIELDS)) return;
-        const next = settled(before, after, column);
+        const next = settled(before, after, column, old.cols[oc]);
         if (!sameFields(after, next, CELL_FIELDS)) write(() => backing.putCell(r, c, next));
       });
     });
@@ -350,7 +406,10 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   function intake(indexes) {
     const old = backing.sheet;
     const found = backing.read(indexes);
-    if (found === null) return null;
+    if (found === null) {
+      if (indexes.some(hidesText) || issues.some((issue) => issue.code === "hidden_text" && indexes.includes(issue.row))) check();
+      return null;
+    }
     if (found.rescanned) {
       retake(old);
       check();
@@ -367,12 +426,20 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     return fromDom({ structure: false, cells, rows: { ...noRecords(), changed: found.rows.map((change) => change.row) }, cols: noRecords() });
   }
 
+  // Whether the row at this index has a cell hidden under a merge that holds text. The mirror keeps
+  // no text for such a cell, so a write that put text there changes nothing it holds, yet the
+  // sheet then needs repair.
+  const hidesText = (r) => Array.from(backing.rowAt(r)?.cells ?? []).some((td) => td.hidden && cleanText(td.textContent).trim() !== "");
+
   // The rows of the table these nodes are in, read as a write from outside the grid made them. A
-  // node in no row of this table, such as the table itself or a col, reads the whole table.
-  // Returns the change event, or null when nothing changed.
+  // node in no row of this table, such as the table itself or a col, reads the whole table. The
+  // table's own thead or tbody adds no row: a row taken out of a group or moved across groups is
+  // found by the read, which compares the row list. Returns the change event, or null when
+  // nothing changed.
   function foreignWrite(nodes) {
     const rows = new Set();
     for (const node of nodes) {
+      if (node.parentNode === table && (node.localName === "tbody" || node.localName === "thead")) continue;
       const r = node === table ? -1 : backing.rowIndexOf(node);
       if (r < 0) return reread();
       rows.add(r);
@@ -469,8 +536,9 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // no row, column or frozen count, fires no event and leaves the revision. The event's
   // `structure` is true when a row or column came, went or moved, when cells were merged or
   // unmerged, or when the frozen counts changed. A cell of a row or column the action took away is
-  // not among the event's cells; the event names the row or column as removed. Returns the change
-  // event, or null.
+  // not among the event's cells; the event names the row or column as removed. A cell the write
+  // leaves showing a number's plain value under a format no formatter knows marks the table stale,
+  // as a host's write marks it. Returns the change event, or null.
   function apply(action) {
     if (fresh !== true) {
       const touched = backing.touched(action);
@@ -527,8 +595,10 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // The value an item of a block puts in a cell: typed text is parsed as the cell editor parses
   // it, under the format of the cell it lands on, and brings a format the cell takes or not. The
   // cell's own editor text is its own content, so Enter on a cell changes nothing. Every text an
-  // item brings is made plain first, typed or not.
-  function itemAt(item, r, c, { detect, formats }) {
+  // item brings is made plain first, typed or not. With `data`, typed text is plain data: it is
+  // parsed as if the cell had no format, unless the cell's format is text "@", where it loses the
+  // apostrophe our export with `protect` writes before text.
+  function itemAt(item, r, c, { detect, formats, data }) {
     if (typeof item !== "string") return cleaned(item);
     if (!detect) return plain(item);
     const rows = backing.rows();
@@ -538,7 +608,8 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     const effective = effectiveFmt(held, column);
     const own = held?.hidden === true ? null : held;
     if (item === editText(contentOf(own), effective, today())) return contentOf(own);
-    const parsed = parseInput(item, { fmt: effective, today: today() });
+    const text = data && fmtKind(effective) === "text" ? unprotected(item) : item;
+    const parsed = parseInput(text, { fmt: data && fmtKind(effective) !== "text" ? null : effective, today: today() });
     const fmt = formats ? adoptFmt(effective, column?.fmt ?? null, parsed.fmt) : undefined;
     return fmt === undefined ? parsed.content : { content: parsed.content, fmt };
   }
@@ -553,18 +624,21 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   }
 
   // A block's items as the cells they land on read them, from a cell on: `detect(j)` says whether
-  // the j-th item of each line is typed text to parse.
-  function itemsAt(at, block, detect, formats) {
+  // the j-th item of each line is typed text to parse, and `data` that typed text is plain data.
+  function itemsAt(at, block, detect, formats, data = false) {
     if (!Array.isArray(block)) return block;
     const { row, col } = parseRef(at);
-    return block.map((line, i) => (Array.isArray(line) ? line.map((item, j) => itemAt(item, row + i, col + j, { detect: detect(j), formats })) : line));
+    return block.map((line, i) => (Array.isArray(line) ? line.map((item, j) => itemAt(item, row + i, col + j, { detect: detect(j), formats, data })) : line));
   }
 
   // Delimited text written from a cell on as one action, the way a paste writes a block: the
   // sheet grows to hold it, a field is typed input unless its column's type is "text", and a
-  // field that starts with "=" is text unless `formulas` is true. `types` lists "auto" or "text"
-  // for the columns of the text, first column first; a column it leaves out is "auto". A "text"
-  // field is kept as it is, with its line breaks made plain.
+  // field that starts with "=" is text unless `formulas` is true. A typed field is plain data: it
+  // is parsed as if its cell had no format, so 5 is five in a percent cell, unless the cell's
+  // format is text "@". `types` lists "auto" or "text" for the columns of the text, first column
+  // first; a column it leaves out is "auto". A "text" field is kept as it is, with its line breaks
+  // made plain and without the apostrophe our export with `protect` writes before text, so export
+  // then import gives the same text.
   function importDelimited(text, at, { delimiter, types = [], formulas = false } = {}) {
     const asText = (j) => types[j] === "text";
     let block;
@@ -575,7 +649,8 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
       block = parseDelimited(text, { delimiter });
       return rowsFrom(at, block);
     });
-    return send(buildImport(backing, at, itemsAt(at, block, (j) => !asText(j), true), { formulas, newId: mint }));
+    const fields = block.map((line) => line.map((field, j) => (asText(j) ? unprotected(field) : field)));
+    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint }));
   }
 
   // Typed input for one cell; a number, true, false or null is taken as a plain value.
@@ -595,7 +670,8 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // shown again, put in place through the backing's own writes, then the writer's parts. A column
   // added for a row that was too long moves that row's later cells right, so every cell is then
   // put where the repaired sheet has it, and the event compares with the table as it was. One
-  // change with source "repair" and no inverse, or null when there was nothing to put right.
+  // change with source "repair" and no inverse, then the stale refresh, or null when there was
+  // nothing to put right.
   function repair() {
     if (!mayWrite(table)) throw new GridRefused("read_only", "this page may not write");
     rescan();
@@ -639,6 +715,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     revision += 1;
     const event = emit({ source: "repair", repairs, cells, rows, cols, structure: true });
     schedule(table);
+    refresh();
     return event;
   }
 
@@ -647,6 +724,8 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     if (grids.get(table) === grid) grids.delete(table);
     listeners.clear();
   }
+
+  refresh();
 
   const grid = {
     get sheet() {

@@ -18,7 +18,7 @@ import { buildKeys } from "./key-vectors.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, "..", "golden");
-const GOLDENS = ["tiny", "merged", "styled", "formulas-formatted", "empty", "two-tabs", "escapes"];
+const GOLDENS = ["tiny", "merged", "styled", "formulas-formatted", "empty", "two-tabs", "escapes", "hidden", "tall-merge"];
 const SEED = 20261111;
 const MUTANTS = 400;
 const NUMBERS = 1000;
@@ -95,6 +95,8 @@ const PATCHES = [
   ["merged anchor keeps its span", "merged", [{ range: "A1", values: [["new"]] }]],
   ["styled cell keeps its style and format", "styled", [{ range: "A1:B1", values: [[1, "x"]] }]],
   ["escapes survive a neighbour edit", "escapes", [{ range: "A1", values: [["<b> & \"q\""]] }]],
+  ["a hidden row keeps hidden when a cell in it changes", "hidden", [{ range: "A2", values: [["x"]] }]],
+  ["append after a group a merge made longer", "tall-merge", [{ append: many(40) }]],
   ["refuse an empty patch", "tiny", []],
   ["refuse an operation with range and append", "tiny", [{ range: "A1", values: [[1]], append: [[1]] }]],
   ["refuse values that are not rows", "tiny", [{ range: "A1", values: [1] }]],

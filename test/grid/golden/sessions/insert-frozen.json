@@ -1,0 +1,40 @@
+{
+  "name": "insert-frozen",
+  "about": "a row inserted before the last frozen row is frozen",
+  "start": {
+    "html": "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\" fmt=\"#,##0\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<thead>\n<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Room</td><td style=\"font-weight:bold\">Cost</td><td style=\"font-weight:bold\">Who</td><td style=\"font-weight:bold\">Note</td></tr>\n</thead><tbody>\n<tr data-id=\"r2\" data-pos=\"G\"><td rowspan=\"3\">Kitchen</td><td n v=\"1200\">1,200</td><td>Ana</td><td>tiles</td></tr>\n<tr data-id=\"r3\" data-pos=\"O\"><td hidden></td><td n>300</td><td>Ben</td></tr>\n<tr data-id=\"r4\" data-pos=\"V\"><td hidden></td><td n>45</td><td colspan=\"2\">paint and brushes</td><td hidden></td></tr>\n<tr data-id=\"r5\" data-pos=\"d\"><td>Hall</td><td n>80</td></tr>\n<tr data-id=\"r6\" data-pos=\"l\"><td>Garden</td></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "insertRows",
+      1,
+      1
+    ],
+    [
+      "insertRows",
+      3,
+      1
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\" fmt=\"#,##0\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"rs1\" data-pos=\"4\"></tr>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Room</td><td style=\"font-weight:bold\">Cost</td><td style=\"font-weight:bold\">Who</td><td style=\"font-weight:bold\">Note</td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"rs2\" data-pos=\"C\"></tr>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td rowspan=\"3\">Kitchen</td><td n v=\"1200\">1,200</td><td>Ana</td><td>tiles</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td hidden></td><td n>300</td><td>Ben</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td hidden></td><td n>45</td><td colspan=\"2\">paint and brushes</td><td hidden></td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td>Hall</td><td n>80</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td>Garden</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 912
+}

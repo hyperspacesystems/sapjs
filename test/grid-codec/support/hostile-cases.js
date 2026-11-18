@@ -31,6 +31,10 @@ export const MISSES = [
   ["cell <td>x</td><td></td> (trailing empty cell)", CELLS("<td>x</td><td></td>")],
   ["cell <td>a > b</td> (raw > in text)", CELLS("<td>a > b</td>")],
   ['row <tr data-pos="a" data-id="r">', ROW('<tr data-pos="a" data-id="r"><td>x</td></tr>')],
+  ['row <tr data-id="r" data-pos="a" style="x" hidden> (order)', ROW('<tr data-id="r" data-pos="a" style="height:9px" hidden><td>x</td></tr>')],
+  ['row <tr data-id="r" data-pos="a" hidden="">', ROW('<tr data-id="r" data-pos="a" hidden=""><td>x</td></tr>')],
+  ['col <col data-id="c" data-pos="a" hidden fmt="0%"> (order)', TABLE('<table grid><colgroup><col data-id="c" data-pos="a" hidden fmt="0%"></colgroup>\n')],
+  ['col <col data-id="c" data-pos="a" style="width:9px" hidden> (order)', TABLE('<table grid><colgroup><col data-id="c" data-pos="a" style="width:9px" hidden></colgroup>\n')],
   ['row <tr data-id="r" data-pos="a" class="x">', ROW('<tr data-id="r" data-pos="a" class="x"><td>x</td></tr>')],
   [
     "a carriage return between two rows",

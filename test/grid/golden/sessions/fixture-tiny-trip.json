@@ -1,0 +1,19 @@
+{
+  "name": "fixture-tiny-trip",
+  "about": "the codec golden tiny#1 loads with no write and keeps its bytes",
+  "start": {
+    "fixture": "tiny#1"
+  },
+  "commands": [],
+  "outcomes": [],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"cd\" data-pos=\"G\"><col data-id=\"ce\" data-pos=\"V\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r7\" data-pos=\"G\"><td>Lisbon</td><td n v=\"46095\" fmt=\"mmm d, yyyy\">Mar 14, 2026</td></tr>",
+    "<tr data-id=\"r8\" data-pos=\"V\"><td>Budget left</td><td n f=\"=5000-Budget!B5\" v=\"3500\" fmt=\"$#,##0.00\">$3,500.00</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 343
+}

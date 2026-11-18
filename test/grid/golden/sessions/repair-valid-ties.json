@@ -1,0 +1,26 @@
+{
+  "name": "repair-valid-ties",
+  "about": "the repair input valid-ties lists its issues, and repair gives the bytes of valid-ties.out.html",
+  "start": {
+    "repair": "valid-ties"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "nothing"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "repaired": "valid-ties",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"a\" data-pos=\"G\"><td>x</td></tr>",
+    "<tr data-id=\"b\" data-pos=\"G\"><td>y</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 179
+}

@@ -1,0 +1,97 @@
+{
+  "name": "input-dates",
+  "about": "typed dates in every US form, and a date that is not on the calendar stays text",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      "3/14/2026"
+    ],
+    [
+      "set",
+      "B1",
+      "3/14/26"
+    ],
+    [
+      "set",
+      "C1",
+      "3/14/30"
+    ],
+    [
+      "set",
+      "D1",
+      "3-14-2026"
+    ],
+    [
+      "set",
+      "A2",
+      "2026-03-14"
+    ],
+    [
+      "set",
+      "B2",
+      "3/14"
+    ],
+    [
+      "set",
+      "C2",
+      "Mar 14, 2026"
+    ],
+    [
+      "set",
+      "D2",
+      "march 14 2026"
+    ],
+    [
+      "set",
+      "A3",
+      "14 Mar 2026"
+    ],
+    [
+      "set",
+      "B3",
+      "Mar 14"
+    ],
+    [
+      "set",
+      "C3",
+      "2/30/2026"
+    ],
+    [
+      "set",
+      "D3",
+      "1/1/1900"
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td n v=\"46095\" fmt=\"m/d/yyyy\">3/14/2026</td><td n v=\"46095\" fmt=\"m/d/yyyy\">3/14/2026</td><td n v=\"11031\" fmt=\"m/d/yyyy\">3/14/1930</td><td n v=\"46095\" fmt=\"m/d/yyyy\">3/14/2026</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td n v=\"46095\" fmt=\"yyyy-mm-dd\">2026-03-14</td><td n v=\"46095\" fmt=\"m/d/yyyy\">3/14/2026</td><td n v=\"46095\" fmt=\"mmm d, yyyy\">Mar 14, 2026</td><td n v=\"46095\" fmt=\"mmm d, yyyy\">Mar 14, 2026</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td n v=\"46095\" fmt=\"mmm d, yyyy\">Mar 14, 2026</td><td n v=\"46095\" fmt=\"mmm d, yyyy\">Mar 14, 2026</td><td>2/30/2026</td><td n v=\"2\" fmt=\"m/d/yyyy\">1/1/1900</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 933
+}

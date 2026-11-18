@@ -402,6 +402,59 @@ function merged() {
   };
 }
 
+// A hidden row, a hidden frozen row and a hidden column, one with a width and one with a format.
+function hidden() {
+  const colKeys = keysBetween(null, null, 3);
+  const rowKeys = keysBetween(null, null, 4);
+  return {
+    sheets: [
+      {
+        id: "h",
+        name: "Hidden",
+        pos: "G",
+        cols: [
+          { id: "h-c0", pos: colKeys[0], hidden: true, width: 90 },
+          { id: "h-c1", pos: colKeys[1], fmt: "0%", hidden: true },
+          { id: "h-c2", pos: colKeys[2] },
+        ],
+        rows: [
+          { id: "h-r1", pos: rowKeys[0], frozen: true, hidden: true, cells: [cell("Head")] },
+          { id: "h-r2", pos: rowKeys[1], hidden: true, style: "height:30px", cells: [cell("a"), cell("0.5", { n: true })] },
+          { id: "h-r3", pos: rowKeys[2], cells: [cell("b"), null, cell("c")] },
+          { id: "h-r4", pos: rowKeys[3], hidden: true, cells: [] },
+        ],
+      },
+    ],
+  };
+}
+
+// 120 rows with a merge down rows 48 to 53 and another down rows 102 to 105: the first group ends
+// at row 53 and the second at row 105, so no group ends inside a merge.
+function tallMerge() {
+  const colKeys = keysBetween(null, null, 2);
+  const rowKeys = keysBetween(null, null, 120);
+  const spans = { 47: 6, 101: 4 };
+  const covered = new Set([48, 49, 50, 51, 52, 102, 103, 104]);
+  return {
+    sheets: [
+      {
+        id: "t",
+        name: "Tall",
+        pos: "G",
+        cols: colKeys.map((pos, i) => ({ id: `t-c${i}`, pos })),
+        rows: rowKeys.map((pos, r) => ({
+          id: `t-r${r + 1}`,
+          pos,
+          cells: [
+            spans[r] ? cell(`Span ${r + 1}`, { rowspan: spans[r] }) : covered.has(r) ? cell("", { hidden: true }) : cell(`A${r + 1}`),
+            cell(`${r + 1}`, { n: true }),
+          ],
+        })),
+      },
+    ],
+  };
+}
+
 function styled() {
   const colKeys = keysBetween(null, null, 3);
   const rowKeys = keysBetween(null, null, 3);
@@ -602,6 +655,8 @@ export const FIXTURES = {
   empty,
   "two-tabs": twoTabs,
   escapes,
+  hidden,
+  "tall-merge": tallMerge,
 };
 
 const attr = (name, value) => ` ${name}="${attrEscape(value)}"`;

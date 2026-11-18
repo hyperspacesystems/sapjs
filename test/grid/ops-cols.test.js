@@ -535,7 +535,6 @@ test("merges follow columns", () => {
 const REFUSED = [
   ["a key that is not a key", insert([{ id: "c0", pos: "0" }]), "bad_key"],
   ["a moved key that is not a key", change([{ id: "cc", pos: "0" }]), "bad_key"],
-  ["a hidden column", insert([{ id: "c0", pos: "5", hidden: true }]), "bad_action"],
   ["a hidden change", change([{ id: "cc", hidden: true }]), "bad_action"],
   ["a width of minus one", insert([{ id: "c0", pos: "5", width: -1 }]), "bad_action"],
   ["a width that is not a whole number", change([{ id: "cc", width: 1.5 }]), "bad_action"],
@@ -545,6 +544,16 @@ const REFUSED = [
   ["a span on an inserted cell", insert([{ id: "c0", pos: "5", cells: [["r1", "x", { colspan: 2 }]] }]), "merge_cut"],
   ["a delete of a column that is not there", remove(["cz"]), "missing_col"],
 ];
+
+test("an inserted hidden column stays hidden, as an undo of its delete puts it back", () => {
+  const store = plain();
+  const before = bytesOf(store);
+  const out = apply(store, insert([{ id: "c0", pos: "5", hidden: true }]), { derive });
+  expect(out.out).toBe("applied");
+  expect(bytesOf(store)).toContain('<col data-id="c0" data-pos="5" hidden>');
+  expect(apply(store, out.inverse, { derive }).out).toBe("applied");
+  expect(unstale(bytesOf(store))).toEqual(before);
+});
 
 test("refusals", () => {
   for (const [name, action, code] of REFUSED) {

@@ -1,0 +1,41 @@
+{
+  "name": "insert-cols",
+  "about": "a column inserted in the middle widens the merge it lands in, and one at the end copies a column's format",
+  "start": {
+    "html": "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\" fmt=\"#,##0\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<thead>\n<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Room</td><td style=\"font-weight:bold\">Cost</td><td style=\"font-weight:bold\">Who</td><td style=\"font-weight:bold\">Note</td></tr>\n</thead><tbody>\n<tr data-id=\"r2\" data-pos=\"G\"><td rowspan=\"3\">Kitchen</td><td n v=\"1200\">1,200</td><td>Ana</td><td>tiles</td></tr>\n<tr data-id=\"r3\" data-pos=\"O\"><td hidden></td><td n>300</td><td>Ben</td></tr>\n<tr data-id=\"r4\" data-pos=\"V\"><td hidden></td><td n>45</td><td colspan=\"2\">paint and brushes</td><td hidden></td></tr>\n<tr data-id=\"r5\" data-pos=\"d\"><td>Hall</td><td n>80</td></tr>\n<tr data-id=\"r6\" data-pos=\"l\"><td>Garden</td></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "insertCols",
+      "D",
+      1
+    ],
+    [
+      "insertCols",
+      "F",
+      1,
+      {
+        "like": "B"
+      }
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\" fmt=\"#,##0\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cs1\" data-pos=\"Z\"><col data-id=\"cd\" data-pos=\"d\"><col data-id=\"cs2\" data-pos=\"p\" fmt=\"#,##0\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Room</td><td style=\"font-weight:bold\">Cost</td><td style=\"font-weight:bold\">Who</td><td></td><td style=\"font-weight:bold\">Note</td><td style=\"font-weight:bold\"></td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td rowspan=\"3\">Kitchen</td><td n v=\"1200\">1,200</td><td>Ana</td><td></td><td>tiles</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td hidden></td><td n>300</td><td>Ben</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"><td hidden></td><td n>45</td><td colspan=\"3\">paint and brushes</td><td hidden></td><td hidden></td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td>Hall</td><td n>80</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td>Garden</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 982
+}

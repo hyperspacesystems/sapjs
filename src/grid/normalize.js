@@ -164,10 +164,11 @@ const uncovered = (cell) => {
 };
 
 // Delete a span from its origin. Every position it covered that holds a hidden cell becomes an
-// empty cell, unless a span kept earlier in the walk already covers it, and every position it
-// covered in a row below that holds a shown cell takes an empty cell before it, so that the cells a
-// browser drew past the span keep the column it drew them in.
-function undo(sheet, row, col, colspan, rowspan, kept, repairs, code = "merge_overlap") {
+// empty cell, unless `kept(row, col, cell)` says to leave it. In a row below, a shown cell on a
+// covered position leaves an empty cell there and moves to just past the span, after the shown
+// cells before it, because a browser draws it there: a hidden cell takes no column, and a cell
+// `kept` names stays where it is.
+function undo(sheet, row, col, colspan, rowspan, kept, repairs, code = "merge_overlap", stays = () => false) {
   const rows = sheet.rows.length;
   const cell = sheet.rows[row].cells[col];
   const shown = !cell.hidden;
@@ -175,16 +176,20 @@ function undo(sheet, row, col, colspan, rowspan, kept, repairs, code = "merge_ov
   delete cell.rowspan;
   for (let i = 0; i < Math.min(rowspan, rows - row); i++) {
     const target = sheet.rows[row + i];
-    for (let j = 0; j < Math.min(colspan, target.cells.length - col); j++) {
+    const width = Math.min(colspan, target.cells.length - col);
+    const past = [];
+    for (let j = 0; j < width; j++) {
       if (i === 0 && j === 0) continue;
-      if (kept.has(at(row + i, col + j))) continue;
       const covered = target.cells[col + j];
-      if (shown && i > 0 && !(covered && covered.hidden)) {
-        target.cells.splice(col + j, 0, null);
+      if (kept(row + i, col + j, covered)) continue;
+      if (shown && i > 0 && !(covered && covered.hidden) && !stays(row + i)) {
+        past.push(covered ?? null);
+        target.cells[col + j] = null;
       } else if (covered && covered.hidden) {
         target.cells[col + j] = uncovered(covered);
       }
     }
+    if (past.length > 0) target.cells.splice(col + width, 0, ...past);
   }
   repairs.push({ code, row, col });
 }
@@ -203,10 +208,22 @@ function covering(sheet, row, col) {
   return found;
 }
 
-// Rule 2: a hidden cell that held text in the live table is shown again, and any merge that
-// covers it is undone.
+// Where a cell object sits in the sheet now, or null.
+function placeOf(sheet, cell) {
+  for (let r = 0; r < sheet.rows.length; r++) {
+    const c = sheet.rows[r].cells.indexOf(cell);
+    if (c >= 0) return { r, c };
+  }
+  return null;
+}
+
+// Rule 2: every hidden cell that held text in the live table is shown again where it was, and then
+// every merge that covers one is undone, leaving the shown cells where they are. All of them are
+// shown first, at the places the live table gave, because undoing a merge can move the cells of a
+// row below it; each is then found again by itself, not by its old place.
 function showHiddenText(sheet, hiddenText, repairs) {
   if (!Array.isArray(hiddenText)) return;
+  const shownCells = new Set();
   for (const item of hiddenText) {
     const row = sheet.rows[item.row];
     if (!row) continue;
@@ -215,8 +232,14 @@ function showHiddenText(sheet, hiddenText, repairs) {
     const shown = { ...cell, text: typeof item.text === "string" ? item.text : "" };
     delete shown.hidden;
     row.cells[item.col] = shown;
-    for (const each of covering(sheet, item.row, item.col)) {
-      undo(sheet, each.r, each.c, each.cs, each.rs, new Set(), repairs, "hidden_text");
+    shownCells.add(shown);
+  }
+  const kept = (r, c, cell) => shownCells.has(cell);
+  for (const cell of shownCells) {
+    for (let place = placeOf(sheet, cell); place !== null; place = placeOf(sheet, cell)) {
+      const [merge] = covering(sheet, place.r, place.c);
+      if (merge === undefined) break;
+      undo(sheet, merge.r, merge.c, merge.cs, merge.rs, kept, repairs, "hidden_text");
     }
   }
 }
@@ -229,8 +252,9 @@ function widthOf(sheet) {
 
 // Rule 3: clamp a span that runs past the sheet, undo a span whose covered positions hold content
 // or another span, turn an orphan hidden cell into an empty cell, and fill a kept span's
-// positions with hidden cells.
-function brokenMerges(sheet, repairs) {
+// positions with hidden cells. A span kept before an undo moved a shown cell under it is undone
+// too, and that cell stays where it is.
+function brokenMerges(sheet, repairs, textRows = new Set()) {
   const rows = sheet.rows.length;
   const width = widthOf(sheet);
   const keptCovers = new Set();
@@ -274,7 +298,7 @@ function brokenMerges(sheet, repairs) {
         }
       }
       if (broken) {
-        undo(sheet, r, c, cs, rs, keptCovers, repairs);
+        undo(sheet, r, c, cs, rs, (row, col) => keptCovers.has(at(row, col)), repairs, "merge_overlap", (row) => textRows.has(row));
         continue;
       }
 
@@ -301,6 +325,10 @@ function brokenMerges(sheet, repairs) {
       const cs = span(cell, "colspan");
       const rs = span(cell, "rowspan");
       if (cs === 1 && rs === 1) continue;
+      if (coversValue(sheet, r, c, cs, rs)) {
+        undo(sheet, r, c, cs, rs, (row, col, here) => Boolean(here) && !here.hidden, repairs);
+        continue;
+      }
       for (let i = 0; i < rs; i++) {
         for (let j = 0; j < cs; j++) {
           if (i === 0 && j === 0) continue;
@@ -315,6 +343,15 @@ function brokenMerges(sheet, repairs) {
       }
     }
   }
+}
+
+// Whether a shown cell sits on a position the span at (row, col) covers.
+function coversValue(sheet, row, col, colspan, rowspan) {
+  for (let i = 0; i < rowspan; i++) {
+    const cells = sheet.rows[row + i]?.cells ?? [];
+    for (let j = 0; j < colspan; j++) if ((i > 0 || j > 0) && cells[col + j] && !cells[col + j].hidden) return true;
+  }
+  return false;
 }
 
 // Rule 4: a column for every cell past the end of the column list. Rules 5 and 6 name them.
@@ -524,15 +561,33 @@ function normalForm(sheet, derive, repairs) {
   });
 }
 
+// The most runs one repair makes. A run can leave work for the next: a span cut to the HTML limit
+// can then run into a merge the run already passed. So the repair runs again until a run changes
+// nothing; a sheet still changing after this many keeps the last result, and its check reports what
+// is left.
+const RUNS = 4;
+
 // Fixes every issue checkSheet reports. Returns { sheet, repairs }: a new sheet, and one entry per
-// thing done, in the order done. Same input, same output, in every process.
+// thing done, in the order done, over every run. Same input, same output, in every process. Text
+// in hidden cells is shown by the first run, whose places `hiddenText` names.
 export function normalizeSheet(sheet, { derive, hiddenText } = {}) {
+  let out = normalizeOnce(sheet, { derive, hiddenText });
+  for (let run = 1; run < RUNS && out.repairs.length > 0; run++) {
+    const again = normalizeOnce(out.sheet, { derive });
+    if (again.repairs.length === 0) break;
+    out = { sheet: again.sheet, repairs: [...out.repairs, ...again.repairs] };
+  }
+  return out;
+}
+
+function normalizeOnce(sheet, { derive, hiddenText }) {
   const model = clone(sheet);
   const repairs = [];
   clampSpans(model, repairs);
-  plainHtml(model, repairs, new Set(Array.isArray(hiddenText) ? hiddenText.map((item) => item.row) : []));
+  const textRows = new Set(Array.isArray(hiddenText) ? hiddenText.map((item) => item.row) : []);
+  plainHtml(model, repairs, textRows);
   showHiddenText(model, hiddenText, repairs);
-  brokenMerges(model, repairs);
+  brokenMerges(model, repairs, textRows);
   shortColumns(model, repairs);
   fixIds(model, repairs);
   fixOrder(model, "col", repairs);

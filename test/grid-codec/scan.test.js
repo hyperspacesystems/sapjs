@@ -9,6 +9,7 @@ function modelRow(row) {
   while (cells.length > 0 && cells[cells.length - 1] === null) cells.pop();
   const expected = { id: row.id, pos: row.pos };
   if (row.frozen) expected.frozen = true;
+  if (row.hidden) expected.hidden = true;
   if (row.style !== undefined) expected.style = row.style;
   expected.cells = cells;
   return expected;

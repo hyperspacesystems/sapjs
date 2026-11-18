@@ -1,0 +1,36 @@
+{
+  "name": "import-tsv-formulas",
+  "about": "TSV imported from a cell inside the sheet with formulas: true brings formulas, and the sheet grows to hold it",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "importDelimited",
+      "a\t=1+1\nb\t=SUM(B2:B3)\nc\t7",
+      "C5",
+      {
+        "delimiter": "\t",
+        "formulas": true
+      }
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid stale><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"><td></td><td></td><td>a</td><td f=\"=1+1\"></td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"><td></td><td></td><td>b</td><td f=\"=SUM(B2:B3)\"></td></tr>",
+    "<tr data-id=\"rs1\" data-pos=\"p\"><td></td><td></td><td>c</td><td n>7</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 580
+}

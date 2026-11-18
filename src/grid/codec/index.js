@@ -2,7 +2,7 @@
 // in hyper-html-api (src/codecs/sheet.vendor.js, written by scripts/propagate.js).
 
 export { MAX_DIGITS, significantDigits, typed, shown, cellValue } from "./value.js";
-export { textEscape, attrEscape, cellHtml, rowHtml, colHtml, tableHtml } from "./write.js";
+export { textEscape, attrEscape, cellHtml, rowHtml, colHtml, groupStarts, tableHtml } from "./write.js";
 export { CodecMiss, scanGrid } from "./scan.js";
 export { holeHtml, holeMarker, cutGrids, joinGrids } from "./cut.js";
 export { RENDERS, QueryRefused, gridModel, cellJson, tabJson, tabIndex, parseRange, readRange } from "./read.js";

@@ -1,0 +1,68 @@
+{
+  "name": "input-formulas",
+  "about": "a formula is kept as typed with empty text and marks the table stale, and a format on it waits for its result",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      "5"
+    ],
+    [
+      "set",
+      "B1",
+      "=A1+1"
+    ],
+    [
+      "set",
+      "C1",
+      "=SUM(A1:B1)"
+    ],
+    [
+      "format",
+      "C1",
+      {
+        "fmt": "$#,##0.00"
+      }
+    ],
+    [
+      "setRange",
+      "D1",
+      [
+        [
+          {
+            "content": {
+              "f": "=A1*2"
+            },
+            "style": {
+              "color": "#ff0000"
+            }
+          }
+        ]
+      ]
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid stale><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td n>5</td><td f=\"=A1+1\"></td><td f=\"=SUM(A1:B1)\" fmt=\"$#,##0.00\"></td><td f=\"=A1*2\" style=\"color:#ff0000\"></td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 517
+}

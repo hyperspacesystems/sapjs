@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { parseRef } from "../../src/grid/a1.js";
 import { keysBetween } from "../../src/grid/codec/order-keys.js";
+import { patchGrid } from "../../src/grid/codec/patch.js";
 import { gridModel } from "../../src/grid/codec/read.js";
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../../src/grid/csv.js";
@@ -15,7 +16,7 @@ import { formatValue } from "../../src/grid/format.js";
 import { newId } from "../../src/grid/grid.js";
 import { editText, parseInput } from "../../src/grid/input.js";
 import { GridRefused } from "../../src/grid/ops.js";
-import { paintsOf } from "../../src/ownership.js";
+import { BEACON, eachPainted, ownsAttr, paintsOf } from "../../src/ownership.js";
 import gridPlugin from "../../src/plugins/grid.js";
 import Sap from "../../src/sap.js";
 import { splitTables } from "./support/laws.js";
@@ -363,7 +364,64 @@ test("a read-only page refuses every command, and still takes a write from outsi
   expect(Sap.grid(scratch).set("B2", "9").source).toBe("api");
 });
 
-test("the ownership rules say a formula cell's text and v, a value cell's text, and every cell's n are painted", () => {
+// A host's undo as ClayJS runs it: it records the page's writes made outside a pause, and leaves out
+// each attribute record the ownership rules call painted, judged on the element after the write.
+// `step()` takes what was recorded since the last call, and `undo(step)` writes it back.
+function hostUndo() {
+  const observer = new MutationObserver(() => {});
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true, attributeOldValue: true, characterDataOldValue: true });
+  observers.push(observer);
+  const recorded = [];
+  let depth = 0;
+  window.clay = {
+    undo: {
+      pause() {
+        if (depth++ === 0) recorded.push(...observer.takeRecords());
+      },
+      resume() {
+        if (--depth === 0) observer.takeRecords();
+      },
+    },
+  };
+  return {
+    step() {
+      recorded.push(...observer.takeRecords());
+      return recorded.splice(0).filter((record) => record.type !== "attributes" || !ownsAttr(record.target, record.attributeName));
+    },
+    undo(step) {
+      for (const record of [...step].reverse()) {
+        if (record.type === "characterData") record.target.data = record.oldValue;
+        else if (record.type === "attributes") {
+          if (record.oldValue === null) record.target.removeAttribute(record.attributeName);
+          else record.target.setAttribute(record.attributeName, record.oldValue);
+        } else {
+          for (const node of record.addedNodes) node.remove();
+          const next = record.nextSibling?.parentNode === record.target ? record.nextSibling : null;
+          for (const node of record.removedNodes) record.target.insertBefore(node, next);
+        }
+      }
+    },
+  };
+}
+
+// The painted values under root, in document order: the list a host compares between the file and
+// the page to tell whether opening the page repainted it (ClayJS's paint heal builds the same list
+// with eachPainted, and saves the page when the two differ).
+function paintedValues(root) {
+  const parts = [];
+  eachPainted(root, (el, paints) => {
+    parts.push(el.localName);
+    for (const name of paints.attrs) if (name !== BEACON) parts.push(`${name}=${el.getAttribute(name) ?? "\u0000"}`);
+    for (const token of paints.classes) parts.push(`.${token}=${el.classList.contains(token)}`);
+    for (const name of paints.vars) parts.push(`${name}=${el.style.getPropertyValue(name)}`);
+    if (paints.text) parts.push(`#${el.textContent}`);
+  });
+  return parts;
+}
+
+const MONEY = `<table grid><colgroup><col data-id="ca" data-pos="G"><col data-id="cb" data-pos="O" fmt="$#,##0.00"><col data-id="cc" data-pos="V"></colgroup><tbody><tr data-id="r1" data-pos="G"><td n>3</td><td n v="7">$7.00</td><td>end</td></tr></tbody></table>`;
+
+test("painted parts: only n is painted, so a formula's text and v and a value cell's shown text are the file's", () => {
   install();
   const p = page(`<main sap>${TINY}</main>`);
   const painted = (ref) => {
@@ -371,13 +429,40 @@ test("the ownership rules say a formula cell's text and v, a value cell's text, 
     return paints && [paints.text, paints.attrs.slice().sort()];
   };
   expect(["C2", "B2", "A2", "A1", "C6"].map(painted)).toEqual([
-    [true, ["n", "v"]],
-    [true, ["n"]],
+    [false, ["n"]],
+    [false, ["n"]],
     [false, ["n"]],
     [false, ["n"]],
     [false, ["n"]],
   ]);
+  expect([ownsAttr(p.td("C2"), "v"), ownsAttr(p.td("B2"), "v"), ownsAttr(p.td("C2"), "n"), ownsAttr(p.td("B2"), "n")]).toEqual([false, false, true, true]);
   expect([paintsOf(p.table), paintsOf(p.table.querySelector("col")), paintsOf(p.table.rows[1])]).toEqual([null, null, null]);
+});
+
+test("painted parts: a host's undo of a formula typed over $7.00 gives back the number 7", async () => {
+  install();
+  const p = page(`<main sap>${MONEY}</main>`);
+  const g = Sap.grid(p.table);
+  await settle();
+  const host = hostUndo();
+  g.set("B1", "=A1*2");
+  await settle();
+  const step = host.step();
+  expect([p.td("B1").getAttribute("f"), p.td("B1").hasAttribute("v"), p.td("B1").textContent]).toEqual(["=A1*2", false, ""]);
+  host.undo(step);
+  await settle();
+  expect([g.get("B1"), p.td("B1").getAttribute("v"), p.td("B1").textContent, p.td("B1").hasAttribute("f")]).toEqual([7, "7", "$7.00", false]);
+});
+
+test("painted parts: opening a sheet an agent wrote repaints its text, and the page's painted values are still the file's", async () => {
+  install();
+  const file = `<main sap>${patchGrid(MONEY, [{ range: "B1", values: [[1234.5]] }]).bytes}</main>`;
+  expect([file.includes("<table grid stale>"), file.includes("<td n>1234.5</td>")]).toEqual([true, true]);
+  const saved = paintedValues(new DOMParser().parseFromString(file, "text/html"));
+  const p = page(file);
+  await settle();
+  expect([p.td("B1").textContent, p.td("B1").getAttribute("v"), p.table.hasAttribute("stale")]).toEqual(["$1,234.50", "1234.5", false]);
+  expect(paintedValues(document)).toEqual(saved);
 });
 
 test("Sap.unmount leaves no listener", async () => {

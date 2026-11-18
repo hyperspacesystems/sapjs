@@ -1,0 +1,31 @@
+{
+  "name": "repair-keys-out-of-order",
+  "about": "the repair input keys-out-of-order lists its issues, and repair gives the bytes of keys-out-of-order.out.html",
+  "start": {
+    "repair": "keys-out-of-order"
+  },
+  "commands": [
+    [
+      "repair"
+    ]
+  ],
+  "outcomes": [
+    "change"
+  ],
+  "startIssues": [
+    "row_pos_order"
+  ],
+  "issues": [],
+  "repaired": "keys-out-of-order",
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"c1\" data-pos=\"G\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td>a</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td>b</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"V\"><td>c</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"l\"><td>d</td></tr>",
+    "<tr data-id=\"r5\" data-pos=\"t\"><td>e</td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 319
+}

@@ -1,0 +1,61 @@
+{
+  "name": "set-nothing",
+  "about": "a command for what the sheet already holds writes nothing",
+  "start": {
+    "fixture": "tiny#0"
+  },
+  "commands": [
+    [
+      "set",
+      "B2",
+      1200
+    ],
+    [
+      "set",
+      "A2",
+      "Rent"
+    ],
+    [
+      "format",
+      "B2",
+      {
+        "fmt": "$#,##0.00"
+      }
+    ],
+    [
+      "format",
+      "A1",
+      {
+        "style": {
+          "font-weight": "bold"
+        }
+      }
+    ],
+    [
+      "clear",
+      "A4:C4"
+    ]
+  ],
+  "outcomes": [
+    "nothing",
+    "nothing",
+    "nothing",
+    "nothing",
+    "nothing"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid freeze-cols=\"1\"><colgroup><col data-id=\"ca\" data-pos=\"G\" style=\"width:180px\"><col data-id=\"cb\" data-pos=\"V\" fmt=\"$#,##0.00\"><col data-id=\"cc\" data-pos=\"l\" fmt=\"0%\"></colgroup>",
+    "<thead>",
+    "<tr data-id=\"r1\" data-pos=\"8\"><td style=\"font-weight:bold\">Item</td><td>Cost</td><td>Share</td></tr>",
+    "</thead><tbody>",
+    "<tr data-id=\"r2\" data-pos=\"G\"><td>Rent</td><td n v=\"1200\">$1,200.00</td><td n f=\"=B2/B$5\" v=\"0.8\">80%</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"><td>Food</td><td n v=\"300\">$300.00</td><td n f=\"=B3/B$5\" v=\"0.2\">20%</td></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"d\"><td style=\"font-weight:bold\">Total</td><td n f=\"=SUM(B2:B3)\" v=\"1500\">$1,500.00</td></tr>",
+    "<tr data-id=\"r6\" data-pos=\"l\"><td colspan=\"3\" style=\"text-align:center\">Prices as of November</td><td hidden></td><td hidden></td></tr>",
+    "</tbody></table>"
+  ],
+  "length": 842
+}

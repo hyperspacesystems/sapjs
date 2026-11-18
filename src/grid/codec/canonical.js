@@ -55,6 +55,7 @@ function cellModel(adapter, td) {
 function rowModel(adapter, tr, frozen) {
   const row = { id: cleanText(adapter.attr(tr, "data-id") ?? ""), pos: cleanText(adapter.attr(tr, "data-pos") ?? "") };
   if (frozen) row.frozen = true;
+  if (has(adapter, tr, "hidden")) row.hidden = true;
   const style = adapter.attr(tr, "style");
   if (style !== null) row.style = cleanText(style);
   row.cells = adapter.children(tr)
@@ -67,6 +68,7 @@ function colModel(adapter, node) {
   const col = { id: cleanText(adapter.attr(node, "data-id") ?? ""), pos: cleanText(adapter.attr(node, "data-pos") ?? "") };
   const fmt = adapter.attr(node, "fmt");
   if (fmt !== null) col.fmt = cleanText(fmt);
+  if (has(adapter, node, "hidden")) col.hidden = true;
   const width = /width:\s*([0-9]{1,7})px/.exec(adapter.attr(node, "style") ?? "");
   if (width) col.width = Number(width[1]);
   return col;

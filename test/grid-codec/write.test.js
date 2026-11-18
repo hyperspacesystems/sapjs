@@ -15,6 +15,8 @@ const NAMES = [
   "empty",
   "two-tabs",
   "escapes",
+  "hidden",
+  "tall-merge",
 ];
 const HASHED = ["budget-20k", "wide-100k"];
 

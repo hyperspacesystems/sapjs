@@ -1,0 +1,74 @@
+{
+  "name": "format-cells",
+  "about": "a cell's own format is set, removed and set to its column's format, and zero is formatted like any number",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "setRange",
+      "A1",
+      [
+        [
+          0,
+          1.5,
+          -2
+        ],
+        [
+          1200,
+          0.25,
+          0
+        ]
+      ]
+    ],
+    [
+      "format",
+      "A1:C2",
+      {
+        "fmt": "0.00"
+      }
+    ],
+    [
+      "format",
+      "B2",
+      {
+        "fmt": "0%"
+      }
+    ],
+    [
+      "format",
+      "A1",
+      {
+        "fmt": null
+      }
+    ],
+    [
+      "format",
+      "C1:C2",
+      {
+        "fmt": "$#,##0.00"
+      }
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td n>0</td><td n v=\"1.5\" fmt=\"0.00\">1.50</td><td n v=\"-2\" fmt=\"$#,##0.00\">-$2.00</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td n v=\"1200\" fmt=\"0.00\">1200.00</td><td n v=\"0.25\" fmt=\"0%\">25%</td><td n v=\"0\" fmt=\"$#,##0.00\">$0.00</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 592
+}

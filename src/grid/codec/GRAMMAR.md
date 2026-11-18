@@ -11,10 +11,10 @@ Over the decoded text of the file. `ws` is a run of zero or more space, tab and 
 ```
 grid     = '<table grid' [' freeze-cols="' count '"'] [' stale'] '>' ws [colgroup ws] [thead ws] {tbody ws} '</table>'
 colgroup = '<colgroup>' {ws col} ws '</colgroup>'
-col      = '<col data-id="' aval '" data-pos="' aval '"' [' fmt="' aval '"'] [' style="width:' count 'px"'] '>'
+col      = '<col data-id="' aval '" data-pos="' aval '"' [' fmt="' aval '"'] [' hidden'] [' style="width:' count 'px"'] '>'
 thead    = '<thead>' {ws row} ws '</thead>'
 tbody    = '<tbody>' {ws row} ws '</tbody>'
-row      = '<tr data-id="' aval '" data-pos="' aval '"' [' style="' aval '"'] '>' {cell} '</tr>'
+row      = '<tr data-id="' aval '" data-pos="' aval '"' [' hidden'] [' style="' aval '"'] '>' {cell} '</tr>'
 cell     = '<td' [' n'] [' t'] [' f="' aval '"'] [' v="' aval '"'] [' fmt="' aval '"']
            [' colspan="' count '"'] [' rowspan="' count '"'] [' hidden'] [' style="' aval '"'] '>' text '</td>'
 aval     = { any character except '"' '&' CR NUL  |  '&amp;'  |  '&quot;' }
@@ -26,14 +26,14 @@ Value limits on `count`: `freeze-cols` is at least 1 (a table with no frozen col
 
 Further rules the grammar alone does not show:
 
-- A cell with `hidden` has empty text.
+- A cell with `hidden` has empty text. A `hidden` row or column is a row or column a person hid; it keeps its cells and its place, and the reader reads its values as any other's.
 - A row's last cell is never a bare `<td></td>`: the writer drops trailing empty cells, so the reader refuses a row that ends with one.
 - Rows in `thead` are the frozen rows. A table has at most one `thead`, and it comes before every `tbody`.
 - The writer always emits a `colgroup` and at least one `tbody`; the reader accepts a table without them, since the grammar marks them optional, and the fixpoint holds row by row and column by column.
 
 ## What the writer emits
 
-`tableHtml(sheet, { groupSize = 50 })` writes the table start tag, the `colgroup` on the same line, then a line feed. Frozen rows go in one `thead`, one row per line. Data rows go in `tbody` groups of `groupSize` rows, one row per line; an empty sheet still gets one empty `tbody`. Escapes: `&amp; &lt; &gt;` in text, `&amp; &quot;` in attribute values, nothing else. A carriage return or a NUL in any value is an error, never written: callers turn CRLF into LF before they write.
+`tableHtml(sheet, { groupSize = 50 })` writes the table start tag, the `colgroup` on the same line, then a line feed. Frozen rows go in one `thead`, one row per line. Data rows go in `tbody` groups of `groupSize` rows, one row per line, except that a group never ends inside a merge down a column: it runs on until every merge open at its cut has ended (`groupStarts(rows, groupSize)`), since a browser draws no cell across two row groups. The next group counts its `groupSize` rows from where the longer group ended. An empty sheet still gets one empty `tbody`. The reader accepts a group of any size. Escapes: `&amp; &lt; &gt;` in text, `&amp; &quot;` in attribute values, nothing else. A carriage return or a NUL in any value is an error, never written: callers turn CRLF into LF before they write.
 
 ## The model
 
@@ -41,8 +41,8 @@ The model the writer takes and the reader returns (frozen at Gate A):
 
 ```js
 // sheet: { id, name, pos, freezeCols?: number, stale?: true, cols: Col[], rows: Row[] }
-// Col:   { id, pos, fmt?: string, width?: number }
-// Row:   { id, pos, frozen?: true, style?: string, cells: (Cell | null)[] }   trailing nulls are not stored
+// Col:   { id, pos, fmt?: string, hidden?: true, width?: number }
+// Row:   { id, pos, frozen?: true, hidden?: true, style?: string, cells: (Cell | null)[] }   trailing nulls are not stored
 // Cell:  { text: string, n?: true, t?: true, f?: string, v?: string, fmt?: string,
 //          colspan?: number, rowspan?: number, hidden?: true, style?: string }
 ```

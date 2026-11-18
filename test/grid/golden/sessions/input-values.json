@@ -1,0 +1,73 @@
+{
+  "name": "input-values",
+  "about": "values given as values, not typed text: a number, minus zero, booleans, a large number and null",
+  "start": {
+    "html": "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>\n<tbody>\n<tr data-id=\"r1\" data-pos=\"G\"></tr>\n<tr data-id=\"r2\" data-pos=\"K\"></tr>\n<tr data-id=\"r3\" data-pos=\"O\"></tr>\n<tr data-id=\"r4\" data-pos=\"V\"></tr>\n<tr data-id=\"r5\" data-pos=\"Z\"></tr>\n<tr data-id=\"r6\" data-pos=\"d\"></tr>\n</tbody></table>"
+  },
+  "commands": [
+    [
+      "set",
+      "A1",
+      450
+    ],
+    [
+      "set",
+      "B1",
+      0
+    ],
+    [
+      "set",
+      "C1",
+      true
+    ],
+    [
+      "set",
+      "D1",
+      false
+    ],
+    [
+      "set",
+      "A2",
+      1e+21
+    ],
+    [
+      "set",
+      "B2",
+      0.1
+    ],
+    [
+      "set",
+      "C2",
+      123456789012345
+    ],
+    [
+      "set",
+      "A1",
+      null
+    ]
+  ],
+  "outcomes": [
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change",
+    "change"
+  ],
+  "startIssues": [],
+  "issues": [],
+  "bytes": [
+    "<table grid><colgroup><col data-id=\"ca\" data-pos=\"G\"><col data-id=\"cb\" data-pos=\"O\"><col data-id=\"cc\" data-pos=\"V\"><col data-id=\"cd\" data-pos=\"d\"></colgroup>",
+    "<tbody>",
+    "<tr data-id=\"r1\" data-pos=\"G\"><td></td><td n>0</td><td>TRUE</td><td>FALSE</td></tr>",
+    "<tr data-id=\"r2\" data-pos=\"K\"><td n>1000000000000000000000</td><td n>0.1</td><td n>123456789012345</td></tr>",
+    "<tr data-id=\"r3\" data-pos=\"O\"></tr>",
+    "<tr data-id=\"r4\" data-pos=\"V\"></tr>",
+    "<tr data-id=\"r5\" data-pos=\"Z\"></tr>",
+    "<tr data-id=\"r6\" data-pos=\"d\"></tr>",
+    "</tbody></table>"
+  ],
+  "length": 519
+}
