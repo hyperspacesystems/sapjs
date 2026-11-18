@@ -16,6 +16,7 @@
 // installs it with Sap.use.
 
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../grid/csv.js";
+import { createSheetWriter } from "../grid/codec/cached-writer.js";
 import { formatValue } from "../grid/format.js";
 import { createGrid, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
@@ -56,6 +57,7 @@ export default {
       formatValue,
       csv: { detectDelimiter, parseDelimited, writeDelimited, protectField },
       newId,
+      createSheetWriter: () => createSheetWriter(),
     });
 
     function forget(table, known) {

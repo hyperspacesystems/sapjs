@@ -76,7 +76,9 @@ export function groupStarts(rows, groupSize = 50) {
   return starts;
 }
 
-export function tableHtml(sheet, { groupSize = 50 } = {}) {
+// Everything of a table but its tbody groups: the table tag, the colgroup and the thead, then the
+// data rows and the index at which each group starts. `line` writes one row.
+export function tableParts(sheet, { groupSize = 50, line = rowHtml } = {}) {
   count(groupSize, 1, "groupSize");
   const rows = sheet.rows ?? [];
   const firstData = rows.findIndex((row) => !row.frozen);
@@ -84,20 +86,19 @@ export function tableHtml(sheet, { groupSize = 50 } = {}) {
   const data = firstData === -1 ? [] : rows.slice(firstData);
   if (data.some((row) => row.frozen)) throw new TypeError("grid codec: frozen rows come before every other row");
 
-  let html = "<table grid";
-  if (sheet.freezeCols) html += ` freeze-cols="${count(sheet.freezeCols, 1, "freezeCols")}"`;
-  if (sheet.stale) html += " stale";
-  html += `><colgroup>${(sheet.cols ?? []).map(colHtml).join("")}</colgroup>\n`;
+  let head = "<table grid";
+  if (sheet.freezeCols) head += ` freeze-cols="${count(sheet.freezeCols, 1, "freezeCols")}"`;
+  if (sheet.stale) head += " stale";
+  head += `><colgroup>${(sheet.cols ?? []).map(colHtml).join("")}</colgroup>\n`;
+  if (frozen.length > 0) head += `<thead>\n${frozen.map(line).join("\n")}\n</thead>`;
+  return { head, data, starts: groupStarts(data, groupSize) };
+}
 
-  if (frozen.length > 0) html += `<thead>\n${frozen.map(rowHtml).join("\n")}\n</thead>`;
+export const groupHtml = (group, line = rowHtml) => `<tbody>\n${group.length > 0 ? `${group.map(line).join("\n")}\n` : ""}</tbody>`;
 
-  const starts = groupStarts(data, groupSize);
-  for (let g = 0; g < starts.length; g++) {
-    const group = data.slice(starts[g], starts[g + 1] ?? data.length);
-    html += "<tbody>\n";
-    if (group.length > 0) html += `${group.map(rowHtml).join("\n")}\n`;
-    html += "</tbody>";
-  }
-
+export function tableHtml(sheet, { groupSize = 50 } = {}) {
+  const { head, data, starts } = tableParts(sheet, { groupSize });
+  let html = head;
+  for (let g = 0; g < starts.length; g++) html += groupHtml(data.slice(starts[g], starts[g + 1] ?? data.length));
   return `${html}</table>`;
 }

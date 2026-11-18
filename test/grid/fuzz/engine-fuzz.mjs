@@ -52,6 +52,7 @@ const { canonicalGrid, domAdapter } = await import("../../../src/grid/codec/cano
 const { gridModel } = await import("../../../src/grid/codec/read.js");
 const { cellValue } = await import("../../../src/grid/codec/value.js");
 const { tableHtml } = await import("../../../src/grid/codec/write.js");
+const { createSheetWriter } = await import("../../../src/grid/codec/cached-writer.js");
 const { contentOf, derive, effectiveFmt } = await import("../../../src/grid/content.js");
 const { fmtKind, isBuiltin } = await import("../../../src/grid/format.js");
 const { normalizeSheet } = await import("../../../src/grid/normalize.js");
@@ -310,9 +311,17 @@ function play(engine, Sap, start, { seed, length = 0, recorded = null, counts = 
   const heard = [];
   const dispatched = [];
   let grid = null;
+  // The cached writer follows the table as a sheet shell does: every change event reaches `touch`,
+  // and a new Grid starts it over. Small groups put many group edges in the fuzz's small tables.
+  const groupSize = 1 + (seed % 3);
+  const writer = createSheetWriter({ groupSize });
   const attach = () => {
     grid = Sap.grid(table);
-    grid.on("change", (event) => heard.push(event));
+    writer.touch(SHEET);
+    grid.on("change", (event) => {
+      heard.push(event);
+      writer.touch(SHEET, event);
+    });
     grid.dispatch = (action) => {
       dispatched.push(action);
       return grid.apply(action);
@@ -456,6 +465,9 @@ function play(engine, Sap, start, { seed, length = 0, recorded = null, counts = 
     current = bytes;
     const strict = gridModel(bytes, 0);
     if (tableHtml(strict) !== bytes) return fail("the strict reader gives the bytes back", firstDifference(tableHtml(strict), bytes));
+    const written = writer.table(SHEET, strict);
+    const plain = tableHtml(strict, { groupSize });
+    if (written !== plain) return fail("the cached writer writes what tableHtml writes", firstDifference(written, plain));
     const normal = normalizeSheet(strict, { derive });
     if (normal.repairs.length > 0) return fail("every state is in the normal form", normal.repairs.slice(0, 4));
     if (grid.issues.length > 0) return fail("the sheet has no issue", grid.issues.map((issue) => issue.code));
