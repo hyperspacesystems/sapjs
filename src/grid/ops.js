@@ -1762,7 +1762,8 @@ function applyFitted(backing, action, { derive, formulas = null, computed = fals
   }
   const out = writeAction(backing, action, { derive, formulas });
   if (out.out !== "applied") return out;
-  // A host with no formatter marks the table stale, as patchGrid does. Law C10 holds with `derive`.
+  // A host with no formatter marks the table stale (patchGrid marks it only when the table holds a
+  // formula or a written number has a format; this model marks every write). Law C10 holds with `derive`.
   // With `derivePlain`, undo restores every value, format and style, but a formatted cell's text is
   // written plain until a tab re-derives it.
   if (derive && derive.plain === true) backing.setStale(true);

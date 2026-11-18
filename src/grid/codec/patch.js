@@ -1,7 +1,9 @@
 // The patch writer: sets ranges and appends rows in one canonical grid, rewriting
-// only the rows it touches and the table start tag (which gains `stale`, since a
-// host cannot format or recalculate). A table that is not canonical throws
-// CodecMiss: the host answers 409 (decision A3).
+// only the rows it touches and the table start tag. A host cannot recalculate or
+// draw a format, so the table is marked `stale` when it holds a formula or the
+// patch wrote a number into a cell or column with a format; a mark already there
+// stays. A table that is not canonical throws CodecMiss: the host answers 409
+// (decision A3).
 //
 // ops: [{ range: "B3", values: [[450]] } | { append: [["Porto", 12]] }]
 // Values are typed input: null clears the content (fmt and style stay), a number
@@ -66,7 +68,14 @@ function readGrid(src) {
   return grid;
 }
 
-function applyRange(grid, op, edited) {
+// Whether a written cell shows a number in a format the host cannot draw. Text ("@") and
+// automatic ("") show a number as the host writes it.
+const needsDraw = (cell, col) => {
+  const fmt = cell?.fmt ?? col?.fmt;
+  return cell?.n === true && fmt !== undefined && fmt !== "" && fmt !== "@";
+};
+
+function applyRange(grid, op, edited, marks) {
   checkGrid(op.values, "values");
   const { r0, c0, r1, c1 } = parseRange(op.range);
   const height = op.values.length;
@@ -88,6 +97,7 @@ function applyRange(grid, op, edited) {
       if (old && old.hidden) throw new QueryRefused("covered_cell", `range ${op.range} writes into a merged cell's covered position`);
       while (row.cells.length <= col) row.cells.push(null);
       row.cells[col] = setCell(old, value);
+      if (needsDraw(row.cells[col], grid.cols[col])) marks.draw = true;
       cells++;
     });
     edited.set(index, row);
@@ -101,18 +111,19 @@ function lastKey(grid, appended) {
   return null;
 }
 
-// Returns { bytes, changed: { cells, rows } }.
+// Returns { bytes, changed: { cells, rows }, stale }.
 export function patchGrid(src, ops, { newId = randomId } = {}) {
   if (!Array.isArray(ops) || ops.length === 0) throw new QueryRefused("bad_patch", "patch is a non-empty list of operations");
   const grid = readGrid(src);
   const ids = new Set([...grid.rows.map(({ row }) => row.id), ...grid.cols.map((col) => col.id)]);
   const edited = new Map();
   const appended = [];
+  const marks = { draw: false };
   let cells = 0;
 
   for (const op of ops) {
     if (op && typeof op.range === "string" && op.append === undefined) {
-      cells += applyRange(grid, op, edited);
+      cells += applyRange(grid, op, edited, marks);
     } else if (op && op.append !== undefined && op.range === undefined) {
       checkGrid(op.append, "append");
       for (const values of op.append) {
@@ -122,6 +133,7 @@ export function patchGrid(src, ops, { newId = randomId } = {}) {
         ids.add(id);
         const row = { id, pos: keyBetween(lastKey(grid, appended), null), cells: values.map((value) => setCell(null, value)) };
         cells += row.cells.filter(Boolean).length;
+        if (row.cells.some((cell, c) => needsDraw(cell, grid.cols[c]))) marks.draw = true;
         appended.push(row);
       }
     } else {
@@ -129,9 +141,11 @@ export function patchGrid(src, ops, { newId = randomId } = {}) {
     }
   }
 
+  const after = [...grid.rows.map(({ row }, index) => edited.get(index) ?? row), ...appended];
+  const stale = grid.table.stale === true || marks.draw || after.some((row) => row.cells.some((cell) => cell?.f !== undefined));
   const edits = [];
   const { freezeCols } = grid.table;
-  edits.push({ start: 0, end: grid.startEnd, bytes: `<table grid${freezeCols ? ` freeze-cols="${freezeCols}"` : ""} stale>` });
+  edits.push({ start: 0, end: grid.startEnd, bytes: `<table grid${freezeCols ? ` freeze-cols="${freezeCols}"` : ""}${stale ? " stale" : ""}>` });
   for (const [index, row] of edited) edits.push({ start: grid.rows[index].start, end: grid.rows[index].end, bytes: rowHtml(row) });
 
   if (appended.length > 0) {
@@ -159,5 +173,5 @@ export function patchGrid(src, ops, { newId = randomId } = {}) {
     from = edit.end;
   }
   out += src.slice(from);
-  return { bytes: out, changed: { cells, rows: appended.length } };
+  return { bytes: out, changed: { cells, rows: appended.length }, stale };
 }

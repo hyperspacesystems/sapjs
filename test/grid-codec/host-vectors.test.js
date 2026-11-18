@@ -38,12 +38,12 @@ test("the patch and order key cases in host-vectors.json match the code", () => 
     let next = 0;
     let got;
     try {
-      const { bytes, changed } = patchGrid(entry.src, entry.ops, { newId: () => `n${++next}` });
-      got = { bytes, changed };
+      const { bytes, changed, stale } = patchGrid(entry.src, entry.ops, { newId: () => `n${++next}` });
+      got = { bytes, changed, stale };
     } catch (error) {
       got = { error: { type: error.name, code: error.code ?? null, message: error.message } };
     }
-    expect([entry.name, got]).toEqual([entry.name, entry.error ? { error: entry.error } : { bytes: entry.bytes, changed: entry.changed }]);
+    expect([entry.name, got]).toEqual([entry.name, entry.error ? { error: entry.error } : { bytes: entry.bytes, changed: entry.changed, stale: entry.stale }]);
   }
   expect(VECTORS.patches.filter((entry) => entry.error).length).toBeGreaterThan(10);
   expect(VECTORS.patches.some((entry) => entry.error?.type === "CodecMiss")).toBe(true);

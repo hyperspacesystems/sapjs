@@ -174,3 +174,36 @@ test("a newId that collides with an existing row is skipped", () => {
   expect(gridModel(bytes, 0).rows[6].id).toBe("fresh");
   expect(calls).toBe(2);
 });
+
+const plainSheet = (cells, extra = {}) => ({
+  id: "q",
+  name: "Q",
+  pos: "G",
+  cols: [{ id: "a", pos: "G" }, { id: "b", pos: "V", fmt: "0%" }],
+  rows: [{ id: "r1", pos: "G", cells }, { id: "r2", pos: "V", cells: [{ text: "x" }] }],
+  ...extra,
+});
+
+const STALE_CASES = [
+  ["text into a sheet with no formula", plainSheet([{ text: "old" }]), [{ range: "A1", values: [["new"]] }], false],
+  ["a number into a column with no format", plainSheet([{ text: "old" }]), [{ range: "A1", values: [[7]] }], false],
+  ["an appended row with no formatted number", plainSheet([{ text: "old" }]), [{ append: [["Porto", "text"]] }], false],
+  ["a formula", plainSheet([{ text: "old" }]), [{ range: "A2", values: [["=A1"]] }], true],
+  ["text beside a formula in an untouched row", plainSheet([{ text: "1", n: true }, { text: "", f: "=A1" }]), [{ range: "A2", values: [["y"]] }], true],
+  ["a number into a column with a format", plainSheet([{ text: "old" }]), [{ range: "B2", values: [[0.5]] }], true],
+  ["a number into a cell with a format", plainSheet([{ text: "1", n: true, fmt: "0.00" }]), [{ range: "A1", values: [[2]] }], true],
+  ["an appended number under a column format", plainSheet([{ text: "old" }]), [{ append: [["Porto", 0.5]] }], true],
+  ["a number into a column with the Text format", plainSheet([{ text: "old" }], { cols: [{ id: "a", pos: "G", fmt: "@" }, { id: "b", pos: "V" }] }), [{ range: "A1", values: [[1042]] }], false],
+  ["an appended formula", plainSheet([{ text: "old" }]), [{ append: [["=A1", "ok"]] }], true],
+  ["a clear over the only formula", plainSheet([{ text: "1", n: true }, { text: "", f: "=A1" }]), [{ range: "B1", values: [[null]] }], false],
+  ["text into a sheet already marked stale", plainSheet([{ text: "old" }], { stale: true }), [{ range: "A1", values: [["new"]] }], true],
+];
+
+for (const [name, sheet, ops, stale] of STALE_CASES) {
+  test(`a patch writing ${name} ${stale ? "marks" : "does not mark"} the table stale`, () => {
+    const result = patchGrid(tableHtml(sheet), ops, { newId: ids() });
+    expect(result.stale).toBe(stale);
+    expect(gridModel(result.bytes, 0).stale === true).toBe(stale);
+    expect(tableHtml(gridModel(result.bytes, 0))).toBe(result.bytes);
+  });
+}

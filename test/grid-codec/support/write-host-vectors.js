@@ -79,6 +79,8 @@ const values = {
 // rows are named n1, n2, ... (a counter per case), so every host gets the same bytes.
 const golden = (name) => scan.find((entry) => entry.name === `golden ${name}`).src;
 const frozenOnly = tableHtml({ cols: [{ id: "ca", pos: "G" }, { id: "cb", pos: "V" }], rows: [{ id: "h1", pos: "G", frozen: true, cells: [{ text: "Name" }, { text: "Qty" }] }] });
+const plainBook = (cells, extra = {}) =>
+  tableHtml({ cols: [{ id: "pa", pos: "G" }, { id: "pb", pos: "V" }], rows: [{ id: "p1", pos: "G", cells }], ...extra });
 const many = (n) => Array.from({ length: n }, (_, i) => [`row ${i + 1}`, i + 1]);
 const PATCHES = [
   ["one number", "tiny", [{ range: "B3", values: [[450]] }]],
@@ -93,6 +95,14 @@ const PATCHES = [
   ["append past a full group", "tiny", [{ append: many(60) }]],
   ["append to a sheet with only a frozen row", frozenOnly, [{ append: [["a", 1], ["b", 2]] }]],
   ["merged anchor keeps its span", "merged", [{ range: "A1", values: [["new"]] }]],
+  ["a number under a column format marks a sheet with no formula stale", "hidden", [{ range: "B1", values: [[0.5]] }]],
+  ["an appended number under a column format marks a sheet with no formula stale", "hidden", [{ append: [[1, 0.5]] }]],
+  ["a formula into a sheet with no formula marks it stale", plainBook([{ text: "1", n: true }]), [{ range: "B1", values: [["=A1*2"]] }]],
+  ["an appended formula marks a sheet with no formula stale", plainBook([{ text: "1", n: true }]), [{ append: [["=A1*2", "ok"]] }]],
+  ["a number into a cell format under a plain column marks it stale", plainBook([{ text: "1.00", n: true, fmt: "0.00" }]), [{ range: "A1", values: [[2]] }]],
+  ["a number under the Text format leaves no mark", plainBook([{ text: "x" }], { cols: [{ id: "pa", pos: "G", fmt: "@" }, { id: "pb", pos: "V" }] }), [{ range: "A1", values: [[1042]] }]],
+  ["clearing the only formula leaves no mark", plainBook([{ text: "1", n: true }, { text: "", f: "=A1" }]), [{ range: "B1", values: [[null]] }]],
+  ["text into a table already marked stale keeps the mark", plainBook([{ text: "x" }], { stale: true }), [{ range: "B1", values: [["y"]] }]],
   ["styled cell keeps its style and format", "styled", [{ range: "A1:B1", values: [[1, "x"]] }]],
   ["escapes survive a neighbour edit", "escapes", [{ range: "A1", values: [["<b> & \"q\""]] }]],
   ["a hidden row keeps hidden when a cell in it changes", "hidden", [{ range: "A2", values: [["x"]] }]],
@@ -114,8 +124,8 @@ const patches = PATCHES.map(([name, source, ops]) => {
   const src = source.startsWith("<") ? source : golden(source);
   let next = 0;
   try {
-    const { bytes, changed } = patchGrid(src, ops, { newId: () => `n${++next}` });
-    return { name, src, ops, bytes, changed };
+    const { bytes, changed, stale } = patchGrid(src, ops, { newId: () => `n${++next}` });
+    return { name, src, ops, bytes, changed, stale };
   } catch (error) {
     return { name, src, ops, error: { type: error.name, code: error.code ?? null, message: error.message } };
   }
