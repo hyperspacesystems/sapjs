@@ -17,3 +17,4 @@ export { bind, print, idsOf, fromIds, frameFrom } from "./formula/text.js";
 export { applyWorkbook, frameOf } from "./workbook.js";
 export { modelWorkbook } from "./workbook-backing.js";
 export { domWorkbook } from "./workbook-dom.js";
+export { createEngine } from "./formula/engine.js";

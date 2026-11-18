@@ -18,7 +18,7 @@
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../grid/csv.js";
 import { createSheetWriter } from "../grid/codec/cached-writer.js";
 import { formatValue } from "../grid/format.js";
-import { createGrid, newId } from "../grid/grid.js";
+import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
 
 const TABLE = "table[grid]";
@@ -58,6 +58,13 @@ export default {
       csv: { detectDelimiter, parseDelimited, writeDelimited, protectField },
       newId,
       createSheetWriter: () => createSheetWriter(),
+      // Every tab under `root` as one workbook with one formula engine (`createSheets`), each
+      // table's Grid known to the plugin as `Sap.grid(table)` gives it.
+      sheets(root) {
+        const made = createSheets(root, options);
+        for (const table of root.querySelectorAll(":scope > section[item] > table[grid]")) tables.set(table, made.grid(table));
+        return made;
+      },
     });
 
     function forget(table, known) {

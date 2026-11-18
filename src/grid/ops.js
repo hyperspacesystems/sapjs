@@ -1738,7 +1738,7 @@ export function applyUnchecked(backing, action, options) {
 
 // The write. `each` writes one action of a batch: a batch that fits has tried whole needs no fits
 // step for each action, and one that nobody tried gets it from `apply`.
-function applyFitted(backing, action, { derive, formulas = null } = {}, each = applyFitted) {
+function applyFitted(backing, action, { derive, formulas = null, computed = false } = {}, each = applyFitted) {
   validate(action);
   if (action.t === "batch") {
     const done = [];
@@ -1747,9 +1747,9 @@ function applyFitted(backing, action, { derive, formulas = null } = {}, each = a
     const cells = [];
     const table = [];
     for (const one of action.actions) {
-      const out = each(backing, one, { derive, formulas });
+      const out = each(backing, one, { derive, formulas, computed });
       if (out.out !== "applied") {
-        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas });
+        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas, computed });
         return refusal(out.code, out.detail);
       }
       done.push(out.inverse);
@@ -1766,9 +1766,9 @@ function applyFitted(backing, action, { derive, formulas = null } = {}, each = a
   // With `derivePlain`, undo restores every value, format and style, but a formatted cell's text is
   // written plain until a tab re-derives it.
   if (derive && derive.plain === true) backing.setStale(true);
-  // With no formula engine (all of M4) a new formula has no result yet: the table says so, so a host
-  // or a later engine knows to compute it.
-  if (out.wroteFormula === true) backing.setStale(true);
-  if (action.t === "set" && action.cells.some((entry) => isFormula(entry[2]))) backing.setStale(true);
+  // With no formula engine a new formula has no result yet: the table says so, so a host or a later
+  // engine knows to compute it. With one (`computed`), the engine writes the result after the step.
+  if (!computed && out.wroteFormula === true) backing.setStale(true);
+  if (!computed && action.t === "set" && action.cells.some((entry) => isFormula(entry[2]))) backing.setStale(true);
   return { out: "applied", inverse: out.inverse, changes: out.changes };
 }

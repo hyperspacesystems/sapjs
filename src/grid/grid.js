@@ -47,9 +47,16 @@ import { serial } from "./dates.js";
 import { fmtKind } from "./format.js";
 import { editText, parseInput } from "./input.js";
 import { normalizeSheet } from "./normalize.js";
+import { createEngine } from "./formula/engine.js";
 import { apply as applyAction, GridRefused } from "./ops.js";
+import { applyWorkbook } from "./workbook.js";
+import { domWorkbook } from "./workbook-dom.js";
 
 const grids = new WeakMap();
+
+// Each Grid's DOM backing, for the workbook `createSheets` builds over the Grids of a page.
+const owned = new WeakMap();
+const engines = new WeakMap();
 
 const isCell = (node) => node.localName === "td" || node.localName === "th";
 
@@ -204,12 +211,22 @@ function settled(before, after, column, beforeColumn = column) {
 // The Grid of a <table grid>. Options: `write(fn)` runs fn as a write that is not an edit (the
 // plugin kit's `write`); `mayWrite(table)` says whether the page may write (the kit's
 // `mayWrite`); `schedule(table)` asks for a pass after a write; `newId(prefix)` mints record
-// ids; `today()` gives today's serial day, for typed dates and the editor text of a date. Loading
-// writes nothing, except the stale refresh on a table marked stale.
-export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday } = {}) {
+// ids; `today()` gives today's serial day, for typed dates and the editor text of a date;
+// `engine` is the formula engine `createSheets` shares among a page's Grids. Loading writes
+// nothing, except the stale refresh on a table marked stale.
+//
+// With an engine, every action goes through `applyWorkbook`, so a row insert rewrites the formulas
+// of every tab and the engine computes what depends on it. The change event's `inverse` is then a
+// workbook step `{ action, restore }`, which `apply` takes back. Another tab's Grid hears what the
+// step changed on its tab as a change with source "workbook", and every tab hears the results the
+// engine wrote there as a change with source "derived" that names them in `results`.
+export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday, engine = null } = {}) {
   if (table?.localName !== "table" || !table.hasAttribute("grid")) throw new TypeError("createGrid takes a <table grid> element");
   const known = grids.get(table);
-  if (known !== undefined) return known;
+  // A Grid made before its page's engine existed (a mount pass ran first) gives way to the
+  // engine's Grid; asking with no engine gets whichever Grid the table has.
+  if (known !== undefined && (engine === null || engines.get(known) === engine)) return known;
+  known?.dispose();
 
   const section = tabOf(table);
   const id = section === null ? "" : section.getAttribute("data-id") ?? "";
@@ -223,16 +240,35 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   };
   check();
 
+  // The changes of a workbook step that fall on this tab, in the reducer's shape.
+  const ownChanges = (changed) => {
+    const mine = (list) => (list ?? []).filter((change) => change.sheet === id);
+    return { cells: mine(changed.cells), rows: mine(changed.rows), cols: mine(changed.cols), table: mine(changed.table) };
+  };
+
   function emit(event) {
     const told = { sheet: id, ...event, revision };
     for (const listener of Array.from(listeners)) listener(told);
     return told;
   }
 
-  // A change the grid did not make: the revision goes up and one event with source "dom" fires.
+  // A change the grid did not make: the revision goes up and one event with source "dom" fires,
+  // then the engine computes what the change touched.
   function fromDom(event) {
     revision += 1;
-    return emit({ source: "dom", ...event });
+    const told = emit({ source: "dom", ...event });
+    recompute(event.rescanned ? null : event.cells);
+    return told;
+  }
+
+  // The engine computes after a write from outside the grid: these cells of this tab, or with
+  // null the whole tab read again. Every tab hears the results as a "derived" change.
+  function recompute(cells) {
+    if (engine === null) return;
+    const whole = cells === null;
+    const changed = { sheets: whole ? [id] : [], structure: whole, cells: whole ? [] : cells.filter((cell) => cell.col !== null).map(({ row, col }) => ({ sheet: id, row, col })), rows: [], cols: [], table: [], formulas: [] };
+    const results = engine.update(changed, { fromStep: false });
+    if (results.length > 0) engine.announce({ sheets: [], cells: [], rows: [], cols: [], results }, id);
   }
 
   // A whole read that found the table changed: one change event with source "dom", which names
@@ -261,7 +297,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
         const cell = backing.cell(r, c);
         if (cell === null || cell.hidden === true) return;
         if (cell.f !== undefined) {
-          waiting = true;
+          if (engine === null) waiting = true;
           return;
         }
         const look = effectiveFmt(cell, column);
@@ -539,7 +575,8 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // not among the event's cells; the event names the row or column as removed. A cell the write
   // leaves showing a number's plain value under a format no formatter knows marks the table stale,
   // as a host's write marks it. Returns the change event, or null.
-  function apply(action) {
+  function apply(step) {
+    const action = engine !== null && step?.action !== undefined && step.t === undefined ? step.action : step;
     if (fresh !== true) {
       const touched = backing.touched(action);
       const rest = fresh === null ? touched : touched.filter((r) => !fresh.has(r));
@@ -554,10 +591,11 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     }
     const rowsBefore = rekeys(action, "changeRows") ? placesOf(backing.rows(), ROW_FIELDS) : null;
     const colsBefore = rekeys(action, "changeCols") ? placesOf(backing.cols(), COL_FIELDS) : null;
-    const out = applyAction(backing, action, { derive });
+    const out = engine === null ? applyAction(backing, action, { derive }) : applyWorkbook(engine.workbook, step, { derive, engine });
     if (out.out !== "applied") throw new GridRefused(out.code, out.detail);
+    const changes = engine === null ? out.changes : ownChanges(out.changed);
     const touched = new Map();
-    for (const change of out.changes.cells) {
+    for (const change of changes.cells) {
       const key = `${change.row}\u0000${change.col}`;
       const first = touched.get(key);
       touched.set(key, { row: change.row, col: change.col, before: first === undefined ? change.before : first.before, after: change.after });
@@ -578,17 +616,25 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
       const after = placesOf(list, fields);
       return (changes ?? []).filter((change) => change.kind === "insert" || change.kind === "delete" || before.get(change[key]) !== after.get(change[key]));
     };
-    const rowChanges = real(out.changes.rows, "row", rowsBefore, backing.rows(), ROW_FIELDS);
-    const colChanges = real(out.changes.cols, "col", colsBefore, backing.cols(), COL_FIELDS);
+    const rowChanges = real(changes.rows, "row", rowsBefore, backing.rows(), ROW_FIELDS);
+    const colChanges = real(changes.cols, "col", colsBefore, backing.cols(), COL_FIELDS);
     const rows = recordsOf(rowChanges, "row");
     const cols = recordsOf(colChanges, "col");
-    const parts = (out.changes.table ?? []).filter((part) => part.before !== part.after);
-    if (cells.length === 0 && [rows, cols].every((list) => list.added.length + list.removed.length + list.changed.length === 0) && parts.length === 0) return null;
+    const parts = (changes.table ?? []).filter((part) => part.before !== part.after);
+    const heard = () => {
+      if (engine !== null) engine.announce(out.changed, id);
+    };
+    const tabsChanged = engine !== null && out.changed.sheets.length > 0;
+    if (!tabsChanged && cells.length === 0 && [rows, cols].every((list) => list.added.length + list.removed.length + list.changed.length === 0) && parts.length === 0) {
+      heard();
+      return null;
+    }
     const reshaped = [...rowChanges, ...colChanges].some((change) => RESHAPING.has(change.kind));
     check();
     revision += 1;
-    const event = emit({ source: "api", action, inverse: out.inverse, cells, rows, cols, structure: reshaped || remerges(action) || parts.length > 0 });
+    const event = emit({ source: "api", action, inverse: out.inverse, cells, rows, cols, structure: reshaped || remerges(action) || parts.length > 0 || tabsChanged });
     schedule(table);
+    heard();
     return event;
   }
 
@@ -716,6 +762,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     const event = emit({ source: "repair", repairs, cells, rows, cols, structure: true });
     schedule(table);
     refresh();
+    recompute(null);
     return event;
   }
 
@@ -723,9 +770,26 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   function dispose() {
     if (grids.get(table) === grid) grids.delete(table);
     listeners.clear();
+    unheard();
   }
 
   refresh();
+
+  // What a step another Grid or a caller made changed on this tab, and the results the engine
+  // wrote here.
+  const unheard =
+    engine === null
+      ? () => {}
+      : engine.on(id, (heard) => {
+          if (heard.source === "derived") {
+            emit({ source: "derived", structure: false, results: heard.results.map(({ row, col }) => ({ row, col })), cells: [], rows: noRecords(), cols: noRecords() });
+            return;
+          }
+          check();
+          revision += 1;
+          emit({ source: "workbook", structure: heard.structure, cells: heard.cells.map(({ row, col, before, after }) => ({ row, col, before, after })), rows: recordsOf(heard.rows, "row"), cols: recordsOf(heard.cols, "col") });
+          schedule(table);
+        });
 
   const grid = {
     get sheet() {
@@ -770,5 +834,19 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   };
   grid.dispatch = grid.apply;
   grids.set(table, grid);
+  owned.set(grid, backing);
+  if (engine !== null) engines.set(grid, engine);
   return grid;
+}
+
+// Every tab of a page as one workbook with one formula engine: each `<section item>` child of
+// `root` holding a `<table grid>` gets its Grid (options as `createGrid` takes them), the Grids
+// share the engine, and the engine computes every formula once, as writes that are not edits.
+// Returns `{ workbook, engine, grid(table) }`.
+export function createSheets(root, options = {}) {
+  let engine = null;
+  const workbook = domWorkbook(root, { mount: (table) => owned.get(createGrid(table, { ...options, engine })) });
+  engine = createEngine(workbook, { write: options.write });
+  engine.load();
+  return { workbook, engine, grid: (table) => createGrid(table, { ...options, engine }) };
 }

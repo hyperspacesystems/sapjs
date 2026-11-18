@@ -14,7 +14,7 @@
 
 import { gridModel } from "./codec/read.js";
 import { isKey } from "./codec/order-keys.js";
-import { derive as defaultDerive } from "./content.js";
+import { contentOf, derive as defaultDerive } from "./content.js";
 import { apply, GridRefused } from "./ops.js";
 import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, print, restoreSlots, slotsOf } from "./formula/text.js";
 
@@ -130,22 +130,27 @@ function insertedIds(action) {
   return out;
 }
 
-export function applyWorkbook(wb, step, { derive = defaultDerive } = {}) {
+export function applyWorkbook(wb, step, { derive = defaultDerive, engine = null } = {}) {
   const inverseStep = step.action !== undefined && step.t === undefined;
   const action = inverseStep ? step.action : step;
   const restore = inverseStep ? step.restore ?? [] : [];
   // Each tab's stale mark before the step: the reducer marks a tab stale on a formula write, and a
   // refused step leaves every tab as it was, the mark too.
   const stale = new Map(wb.sheets().map((tab) => [tab.id, tab.backing.sheet.stale === true]));
-  const run = { wb, derive, stale, journal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false } };
+  const run = { wb, derive, computed: engine !== null, stale, journal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false } };
+  let out;
   try {
     if (action.t === "sort") return refusal("bad_action", "sort comes with the room codec");
-    return TAB.has(action.t) ? applyTab(run, action, restore) : applySheet(run, action, restore);
+    out = TAB.has(action.t) ? applyTab(run, action, restore) : applySheet(run, action, restore);
   } catch (err) {
     takeBack(run);
     if (err instanceof GridRefused) return refusal(err.code, err.detail);
     return refusal("rewrite_failed", String(err?.message ?? err));
   }
+  // The engine computes after the step, outside all or nothing: its writes are results, which a
+  // later step or a reload computes again, never content.
+  if (out.out === "applied" && engine !== null) out.changed.results = engine.update(out.changed);
+  return out;
 }
 
 // Every rewrite and restore write goes through here, so a failure can take it back.
@@ -156,7 +161,7 @@ function put(run, tab, r, c, next) {
   const old = b.cell(r, c);
   b.putCell(r, c, next);
   run.journal.push({ sheet: tab.id, row, col, old });
-  run.changed.cells.push({ sheet: tab.id, row, col });
+  run.changed.cells.push({ sheet: tab.id, row, col, before: contentOf(old), after: contentOf(next) });
   run.changed.formulas.push({ sheet: tab.id, row, col });
 }
 
@@ -177,16 +182,16 @@ function takeBack(run) {
 }
 
 function applySheet(run, action, restore) {
-  const { wb, derive } = run;
+  const { wb, derive, computed } = run;
   const tab = wb.sheets().find((t) => t.id === sheetOf(action));
   if (!tab) return refusal("missing_sheet", `no tab ${JSON.stringify(sheetOf(action))}`);
   const before = frameOf(wb);
   const printed = printSets(action, before);
   const moves = structural(action);
   const gone = moves ? deletedFormulas(wb, action) : [];
-  const out = apply(tab.backing, printed, { derive, formulas: {} });
+  const out = apply(tab.backing, printed, { derive, formulas: {}, computed });
   if (out.out !== "applied") return out;
-  run.undo = () => apply(tab.backing, out.inverse, { derive, formulas: {} });
+  run.undo = () => apply(tab.backing, out.inverse, { derive, formulas: {}, computed });
   for (const change of out.changes.cells) run.changed.cells.push({ ...change, sheet: tab.id });
   for (const change of out.changes.rows ?? []) run.changed.rows.push({ ...change, sheet: tab.id });
   for (const change of out.changes.cols ?? []) run.changed.cols.push({ ...change, sheet: tab.id });

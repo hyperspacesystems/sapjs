@@ -18,7 +18,7 @@
 //      overwrite a formula with a number exercise the bound inverse of a set.
 //   P5 the control: the same session with every restore list emptied fails P2 or P3.
 
-import { applyWorkbook, modelWorkbook } from "../../../../src/grid/index.js";
+import { applyWorkbook, createEngine, modelWorkbook } from "../../../../src/grid/index.js";
 import { bind, frameOf, idsOf } from "../../../../src/grid/index.js";
 import { buildDeleteCols, buildDeleteRows, buildInsertCols, buildInsertRows, buildMoveRows, buildSet } from "../../../../src/grid/build.js";
 import { colName } from "../../../../src/grid/a1.js";
@@ -230,11 +230,43 @@ function namedLimit(was, now) {
   return moved.length === 1 && now[moved[0]] !== null && now[moved[0]] !== 0 ? "narrowed" : null;
 }
 
-export function run(seed, { naive = false, strict = false, steps = STEPS } = {}) {
+// E1, with `computing`: after every step a fresh engine computing the whole workbook writes no cell
+// and finds every result the running engine holds. Returns the first difference, or null.
+function computesAgain(wb, engine) {
+  const fresh = createEngine(wb);
+  const written = fresh.load();
+  if (written.length > 0) {
+    const tab = wb.sheets().find((one) => one.id === written[0].sheet);
+    const cell = tab.backing.cell(tab.backing.rowIndex(written[0].row), tab.backing.colIndex(written[0].col));
+    return { cell: written[0], f: cell.f, stored: JSON.stringify(engine.result(written[0].sheet, written[0].row, written[0].col)), now: JSON.stringify(fresh.result(written[0].sheet, written[0].row, written[0].col)), why: "a full computation wrote a result the step left out" };
+  }
+  for (const tab of wb.sheets()) {
+    const rows = tab.backing.rows();
+    const cols = tab.backing.cols();
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < cols.length; c++) {
+        if (tab.backing.cell(r, c)?.f === undefined) continue;
+        const was = JSON.stringify(engine.result(tab.id, rows[r].id, cols[c].id));
+        const now = JSON.stringify(fresh.result(tab.id, rows[r].id, cols[c].id));
+        if (was !== now) return { cell: { sheet: tab.id, row: rows[r].id, col: cols[c].id }, was, now, why: "the running engine holds another result" };
+      }
+    }
+  }
+  return null;
+}
+
+export function run(seed, { naive = false, strict = false, steps = STEPS, computing = false } = {}) {
   const rand = rng(seed);
   idn = 0;
   const wb = modelWorkbook([makeSheet("s1", "Budget", "A", 10, 5, rand), makeSheet("s2", "Notes tab", "B", 8, 4, rand)]);
   addFormulas(wb, rand, 14);
+  const engine = computing ? createEngine(wb) : null;
+  engine?.load();
+  const settled = (step) => {
+    if (engine === null) return null;
+    const off = computesAgain(wb, engine);
+    return off === null ? null : { seed, fail: "E1 a full computation differs from the running engine", step, ...off };
+  };
   const first = bytes(wb);
   const m0 = meanings(wb);
   const expect = new Map(m0);
@@ -245,8 +277,10 @@ export function run(seed, { naive = false, strict = false, steps = STEPS } = {})
       const open = log.filter((entry) => !entry.undone);
       const pick = open[Math.floor(rand() * open.length)];
       const inv = naive ? { action: pick.inverse.action, restore: [] } : pick.inverse;
-      const out = applyWorkbook(wb, inv);
+      const out = applyWorkbook(wb, inv, { engine });
       if (out.out !== "applied") continue;
+      const off = settled(step);
+      if (off !== null) return off;
       pick.undone = true;
       if (pick.prior) for (const [key, was] of pick.prior) was === undefined ? expect.delete(key) : expect.set(key, was);
       log.push({ action: inv.action, inverse: out.inverse, undo: true, undone: true });
@@ -275,9 +309,13 @@ export function run(seed, { naive = false, strict = false, steps = STEPS } = {})
       if (action === null || action === undefined) continue;
       // P4: the same action on a workbook read back from its bytes gives the same bytes.
       const twin = twinOf(wb);
-      const out = applyWorkbook(wb, action);
+      const twinEngine = computing ? createEngine(twin) : null;
+      twinEngine?.load();
+      const out = applyWorkbook(wb, action, { engine });
       if (out.out !== "applied") continue;
-      const out2 = applyWorkbook(twin, action);
+      const off = settled(step);
+      if (off !== null) return { ...off, action: JSON.stringify(action).slice(0, 300) };
+      const out2 = applyWorkbook(twin, action, { engine: twinEngine });
       if (out2.out === "applied" && JSON.stringify(out2.inverse) !== JSON.stringify(out.inverse)) return { seed, fail: "P6 inverse differs on a twin read from bytes", step };
       if (out2.out !== "applied" || bytes(twin) !== bytes(wb)) return { seed, fail: "P4 a twin read from bytes writes other bytes", step };
       const entry = { action, inverse: out.inverse };
@@ -318,11 +356,13 @@ export function run(seed, { naive = false, strict = false, steps = STEPS } = {})
     const entry = log[i];
     if (entry.undone) continue;
     const inv = naive ? { action: entry.inverse.action, restore: [] } : entry.inverse;
-    const out = applyWorkbook(wb, inv);
+    const out = applyWorkbook(wb, inv, { engine });
     if (out.out !== "applied") {
       if (strict) return { seed, fail: "P3 an undo was refused", code: out.code, step: i };
       return null;
     }
+    const off = settled(`unwind ${i}`);
+    if (off !== null) return off;
     entry.undone = true;
   }
   const mEnd = meanings(wb);
