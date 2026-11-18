@@ -1,0 +1,152 @@
+// node test/mutations/grid-formula.mjs [rule-6|rule-7|name-restore|float-restore|typed-restore|
+//   take-back|bind-set-inverse|enc-past-end|growing-set|slot-keys|by-pos-tie|reversed-span|text-not-formula|na-literal|stale-back]
+// Each entry removes one rule from the formula text or the workbook apply and names the test that
+// must then fail. With no argument every entry runs, one after another.
+import { mutate } from "./harness.mjs";
+
+const TEXT = "src/grid/formula/text.js";
+const WORKBOOK = "src/grid/workbook.js";
+const GATE = "test/grid/formula/rewrite-fuzz.test.js";
+const BACKING = "src/grid/workbook-backing.js";
+
+const TEXT_TEST = "test/grid/formula/text.test.js";
+const BOOK_TEST = "test/grid/workbook.test.js";
+const RED = /expect|Expected|Received|toBe|toEqual/;
+
+mutate({
+  "rule-6": {
+    what: "a restore is judged on the meaning the inverse's own rewrite left, not the one before it",
+    file: WORKBOOK,
+    find: "meantBefore.set(entry, pre !== null && cornersUnordered(idsOf(pre)) === cornersUnordered(guard.ids));",
+    replace: "meantBefore.set(entry, false);",
+    test: BOOK_TEST,
+    name: "an end past the edge comes back as typed when the growth that reached it is undone",
+    expects: RED,
+  },
+  "rule-7": {
+    what: "a lossy rewrite drops its restore entry when the text it writes is the same as the text it read",
+    file: WORKBOOK,
+    find: "if (text === cell.f && !loses) continue;",
+    replace: "if (text === cell.f) continue;",
+    test: GATE,
+    name: "the rewrite laws hold on every seed when each undo runs in order, and fail without the restore lists",
+    expects: RED,
+  },
+  "name-restore": {
+    what: "a reference a tab action bound by name comes back whole on undo",
+    file: WORKBOOK,
+    find: "const named = bound.refs.some((ref) => ref.unbound);",
+    replace: "const named = false;",
+    test: GATE,
+    name: "the rewrite laws hold on every seed when each undo runs in order, and fail without the restore lists",
+    expects: RED,
+  },
+  "float-restore": {
+    what: "an end past the edge that now binds a record comes back whole on undo",
+    file: WORKBOOK,
+    find: 'const floating = was.some((ref) => Array.isArray(ref) && ref[0] !== "~" && ref.includes(0));',
+    replace: "const floating = false;",
+    test: GATE,
+    name: "the rewrite laws hold on every seed when each undo runs in order, and fail without the restore lists",
+    expects: RED,
+  },
+  "typed-restore": {
+    what: "a restore keeps the spelling the author typed when the text already means the ids it carries",
+    file: WORKBOOK,
+    find: "if (now !== null && JSON.stringify(idsOf(now)) === JSON.stringify(refs)) return f;",
+    replace: "if (false) return f;",
+    test: BOOK_TEST,
+    name: "a typed spelling comes back when its undo runs",
+    expects: RED,
+  },
+  "take-back": {
+    what: "a refused step leaves the cells its rewrite already wrote",
+    file: WORKBOOK,
+    find: "    if (r >= 0 && c >= 0) tab.backing.putCell(r, c, old);\n",
+    replace: "",
+    test: BOOK_TEST,
+    name: "all or nothing: a write that throws takes every tab back",
+    expects: RED,
+  },
+  "bind-set-inverse": {
+    what: "a set's inverse carries no ids, so an undo after a structural edit means other cells",
+    file: WORKBOOK,
+    find: "function bindSetInverse(inverse, frame) {\n",
+    replace: "function bindSetInverse(inverse, frame) {\n  return inverse;\n",
+    test: BOOK_TEST,
+    name: "a set's undo, run after a row went in above the formula's target, puts back a formula that follows the rows",
+    expects: RED,
+  },
+  "enc-past-end": {
+    what: "an end past the edge is written as a mark that reads back as a record id",
+    file: TEXT,
+    find: 'const enc = (id) => (id === undefined ? 0 : id);',
+    replace: 'const enc = (id) => (id === undefined ? "?" : id);',
+    test: TEXT_TEST,
+    name: "idsOf writes 0 past the edge and a name for an unknown tab, and fromIds reads both",
+    expects: RED,
+  },
+  "growing-set": {
+    what: "a set that grows the sheet does not rewrite the formulas it moves",
+    file: WORKBOOK,
+    find: "const grows = (action) => action.t === \"set\" && ((action.rows?.length ?? 0) > 0 || (action.cols?.length ?? 0) > 0);",
+    replace: "const grows = () => false;",
+    test: BOOK_TEST,
+    name: "an end past the edge comes back as typed when the growth that reached it is undone",
+    expects: RED,
+  },
+  "slot-keys": {
+    what: "a slot's key names its ends in parse order, so a range whose corners swapped looks changed",
+    file: TEXT,
+    find: '    return [ref.s, ...[mark(ref.r0), mark(ref.r1)].sort(), ...[mark(ref.c0), mark(ref.c1)].sort()].join("|");',
+    replace: '    return [ref.s, mark(ref.r0), mark(ref.c0), mark(ref.r1), mark(ref.c1)].join("|");',
+    test: TEXT_TEST,
+    name: "slot keys hold a range's corners in one order",
+    expects: RED,
+  },
+  "by-pos-tie": {
+    what: "two tabs with one order key keep the order they happened to be read in",
+    file: BACKING,
+    find: "export const byPos = (a, b) => (a.pos < b.pos ? -1 : a.pos > b.pos ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);",
+    replace: "export const byPos = (a, b) => (a.pos < b.pos ? -1 : a.pos > b.pos ? 1 : 0);",
+    test: BOOK_TEST,
+    name: "two tabs given one order key keep one order, by id, on the page and in the model, whichever came first",
+    expects: RED,
+  },
+  "reversed-span": {
+    what: "a range typed bottom to top searches for a deleted end from the wrong side and shrinks to one cell",
+    file: TEXT,
+    find: "  let top = i0 <= i1 ? a : b;\n  let bottom = i0 <= i1 ? b : a;",
+    replace: "  let top = a;\n  let bottom = b;",
+    test: BOOK_TEST,
+    name: "a range typed bottom to top keeps every row it still holds when an end row is deleted",
+    expects: RED,
+  },
+  "text-not-formula": {
+    what: "an undo reads text that starts with = as a formula and brings it back live",
+    file: WORKBOOK,
+    find: "const formulaOf = (content) => (content && typeof content === \"object\" && typeof content.f === \"string\" ? content.f : null);",
+    replace: "const formulaOf = (content) => (typeof content === \"string\" && content.startsWith(\"=\") ? content : content && typeof content === \"object\" && typeof content.f === \"string\" ? content.f : null);",
+    test: BOOK_TEST,
+    name: "an undo of a number typed over text that starts with = gives back the text, not a formula",
+    expects: RED,
+  },
+  "na-literal": {
+    what: "#N/A does not read as an error literal, so its formula never follows its rows",
+    file: TEXT,
+    find: "const ERROR = /^#(?:[A-Za-z0-9/]+[!?]|[Nn]\\/[Aa])/;",
+    replace: "const ERROR = /^#[A-Za-z0-9/]+[!?]/;",
+    test: BOOK_TEST,
+    name: "a formula holding the literal #N/A follows its rows",
+    expects: RED,
+  },
+  "stale-back": {
+    what: "a refused step leaves the stale mark the reducer set",
+    file: WORKBOOK,
+    find: "    if (was !== undefined && (tab.backing.sheet.stale === true) !== was) tab.backing.setStale(was);",
+    replace: "",
+    test: BOOK_TEST,
+    name: "a refused undo leaves no stale mark from the formula it brought back",
+    expects: RED,
+  },
+});

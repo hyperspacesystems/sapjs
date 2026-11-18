@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const GRID = join(__dirname, "..", "..", "src", "grid");
 const BANNED = /\b(Date|Intl|toLocaleString|toFixed|Math\.random|document|window|innerHTML|outerHTML)\b/;
-const SKIP = new Set(["backing-dom.js", "grid.js"]);
+const SKIP = new Set(["backing-dom.js", "grid.js", "workbook-dom.js"]);
 
 function impure(folder) {
   const files = readdirSync(folder).filter((name) => name.endsWith(".js") && !SKIP.has(name));
