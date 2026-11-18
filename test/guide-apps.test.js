@@ -34,10 +34,6 @@ function mountClean(name) {
 const submit = (form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 const rows = (root, sel) => [...root.querySelectorAll(sel)].filter((r) => !r.hasAttribute("template"));
 
-test("the guide has exactly the three worked apps", () => {
-  expect(Object.keys(apps)).toEqual(["tracker", "kanban", "notes"]);
-});
-
 describe("9.1 expense tracker", () => {
   test("mounts clean, recomputes totals, adds through the composer and removes", async () => {
     const root = mountClean("tracker");

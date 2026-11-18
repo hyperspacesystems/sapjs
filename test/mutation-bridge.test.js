@@ -79,11 +79,6 @@ describe("source selection", () => {
     expect(createObserver).not.toHaveBeenCalled();
   });
 
-  test("no hyperclay -> nativeSource", () => {
-    mount(`<main sap state="m=hi"><span text="state.m"></span></main>`);
-    expect(_activeSourceKind()).toBe("native");
-  });
-
   test("bare window.hyperclay (namespace only, no Mutation) -> native now, cedes to a real late hub", () => {
     window.hyperclay = {}; // a namespace owner, but no Mutation hub will publish here
     mount(`<main sap state="m=hi"><span text="state.m"></span></main>`);

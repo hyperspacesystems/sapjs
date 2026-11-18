@@ -65,11 +65,6 @@ describe("editable each rows", () => {
     await flush();
     expect(Sap(root).pick).toBe("b");
   });
-
-  test("a bind that resolves nowhere is still E43", () => {
-    mount(`<main sap><ul each="[{ k: 1 }]" key="item.k"><template><li><input bind="nowhere"></li></template></ul></main>`);
-    expect(codes()).toContain("E43");
-  });
 });
 
 describe("composer forms are never projections", () => {

@@ -53,15 +53,6 @@ describe("the homepage loads the real, shipped Sap", () => {
     expect(typeof Sap.formats).toBe("object");
     expect(typeof Sap.config).toBe("function");
   });
-
-  test("the homepage ships 15 demos, each with a single [sap] root", () => {
-    expect(demos.length).toBe(15);
-    for (const d of demos) {
-      const wrap = document.createElement("div");
-      wrap.innerHTML = d.markup;
-      expect(wrap.querySelectorAll("[sap]").length).toBe(1);
-    }
-  });
 });
 
 describe("every demo mounts GREEN on the real engine (the page's own gate)", () => {

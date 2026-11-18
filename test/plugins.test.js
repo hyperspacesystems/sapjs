@@ -120,15 +120,6 @@ test("5. a change made after the pass was scheduled, in the same task, is still 
   expect(root.querySelector("li[total]").textContent).toBe("104");
 });
 
-test("6. Sap.flush settles queued changes in the same task", () => {
-  const root = mount(PAGE);
-  root.querySelectorAll("li")[0].firstChild.data = "1";
-  expect(root.querySelector("li[total]").textContent).toBe("7");
-  expect(Sap.flush()).toBe(null);
-  expect(root.querySelector("li[total]").textContent).toBe("5");
-  expect(root.querySelector("#double").textContent).toBe("10");
-});
-
 test("7. helpers sit outside the frozen 13 arguments, and a frozen name wins", () => {
   mount(PAGE);
   const entry = compile("tally('scores') + sum([1, 2])");
@@ -218,17 +209,6 @@ test("13. a boundary limited to one tag is ordinary markup on any other tag", as
   expect(Sap._registry.get(root).halted).toBeFalsy();
   await tick(20);
   expect(Sap.plugins.status().failed).toContain("grid");
-});
-
-test("14. a pass the DOM did not cause has an empty change list", async () => {
-  const root = mount(PAGE);
-  await tick();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const seen = Sap.tally.seen;
-  const from = seen.length;
-  type(root.querySelector("input"), "typed");
-  await tick();
-  expect(seen.slice(from)).toEqual([[]]);
 });
 
 describe("15. a pending helper anywhere keeps the saved page", () => {

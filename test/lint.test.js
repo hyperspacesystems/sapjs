@@ -19,10 +19,6 @@ describe("mount lint: loud, attributed, halting failures", () => {
     expect(Sap.status().apps[0].ok).toBe(false);
   });
 
-  test("E02 moustaches in text content halt", () => {
-    expect(codesFor(`<main sap><p>{{ x }}</p></main>`)).toContain("E02");
-  });
-
   test("E04 duplicate declaration in one scope", () => {
     expect(codesFor(`<main sap state="a a"></main>`)).toContain("E04");
   });

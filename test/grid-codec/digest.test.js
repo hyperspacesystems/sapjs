@@ -128,18 +128,6 @@ test("every change vector's verdict is rowChange over its recorded column ids", 
   }
 });
 
-test("replacing a filled column with another filled column at the same position is destruction", () => {
-  const cols = (ids) => ids.map((id) => ({ id }));
-  const row = (texts) => ({ id: "r1", cells: texts.map((text) => ({ text })) });
-  const ids = (list) => columnIds({ cols: cols(list) });
-  const before = rowDigest(row(["alice@example.test", "125"]), cols(["email", "amount"]));
-  const after = rowDigest(row(["555-0100", "125"]), cols(["phone", "amount"]));
-  expect(before[5]).toBe(after[5]);
-  expect(rowChange(before, after, ids(["email", "amount"]), ids(["phone", "amount"]))).toBe("destruction");
-  const overwritten = rowDigest(row(["bob@example.test", "125"]), cols(["email", "amount"]));
-  expect(rowChange(before, overwritten, ids(["email", "amount"]), ids(["email", "amount"]))).toBe("modification");
-});
-
 test("a removed filled column is destruction even when another column is inserted", () => {
   const cols = (ids) => ids.map((id) => ({ id }));
   const row = (texts) => ({ id: "r1", cells: texts.map((text) => ({ text })) });

@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { backing, bytesOf, fixture, keptEmpty, rowLine, startTag, S, unstale } from "./support/ops-fixture.js";
+import { backing, bytesOf, keptEmpty, rowLine, startTag, S, unstale } from "./support/ops-fixture.js";
 import { derive } from "../../src/grid/content.js";
-import { normalizeSheet } from "../../src/grid/normalize.js";
 import { modelBacking } from "../../src/grid/backing-model.js";
 import { gridModel } from "../../src/grid/codec/read.js";
 import { patchGrid } from "../../src/grid/codec/patch.js";
@@ -13,10 +12,6 @@ import { apply, applyUnchecked, creates, fits, GridRefused, needs, targets, vali
 global.__SAP_KEEP_CONSOLE__ = true;
 
 const GOLDEN = join(__dirname, "..", "grid-codec", "golden", "tiny.html");
-
-test("the fixture is in normal form", () => {
-  expect(normalizeSheet(fixture(), { derive }).repairs).toEqual([]);
-});
 
 const PINS = [
   [

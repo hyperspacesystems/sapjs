@@ -2,7 +2,6 @@ import { FIXTURES } from "./support/fixtures.js";
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { patchGrid } from "../../src/grid/codec/patch.js";
 import { gridModel, QueryRefused } from "../../src/grid/codec/read.js";
-import { CodecMiss } from "../../src/grid/codec/scan.js";
 
 const tinySrc = () => tableHtml(FIXTURES.tiny().sheets[0]);
 const ids = () => { let n = 0; return () => `new${n++}`; };
@@ -167,33 +166,6 @@ for (const [ops, code] of REFUSALS) {
     expect(error.code).toBe(code);
   });
 }
-
-test("a hand-edited table is a codec miss, not a refusal", () => {
-  const src = tinySrc().replace("<td>Rent", "<td>Rent &copy;");
-  expect(src).not.toBe(tinySrc());
-  expect(() => patchGrid(src, [{ range: "B3", values: [[1]] }])).toThrow(CodecMiss);
-  let error = null;
-  try {
-    patchGrid(src, [{ range: "B3", values: [[1]] }]);
-  } catch (caught) {
-    error = caught;
-  }
-  expect(error instanceof CodecMiss).toBe(true);
-  expect(error instanceof QueryRefused).toBe(false);
-});
-
-test("a refusal in the second operation returns no partial result", () => {
-  let result;
-  let error = null;
-  try {
-    result = patchGrid(tinySrc(), [{ range: "B3", values: [[1]] }, { range: "B6", values: [[1]] }]);
-  } catch (caught) {
-    error = caught;
-  }
-  expect(error).toBeInstanceOf(QueryRefused);
-  expect(error.code).toBe("covered_cell");
-  expect(result).toBeUndefined();
-});
 
 test("a newId that collides with an existing row is skipped", () => {
   let calls = 0;

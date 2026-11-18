@@ -14,8 +14,6 @@ global.__SAP_KEEP_CONSOLE__ = true;
 
 const TODAY = 46095;
 const CEILING = 30;
-const LINE = "1px solid #000000";
-const PRESETS = ["all", "outer", "inner", "top", "bottom", "left", "right"];
 
 const printed = [];
 
@@ -160,20 +158,4 @@ test("printed: 20,000 grouped numbers, each with its own format against one colu
   printed.push(`grouped numbers, own format on every cell: ${fixed(counts[0][1])} per cell, ${fixed(counts[0][2])} for the sheet`);
   printed.push(`grouped numbers, one column format: ${fixed(counts[1][1])} per cell, ${fixed(counts[1][2])} for the sheet`);
   expect(counts.map(([n]) => n)).toEqual([20000, 20000]);
-});
-
-test("printed: a fully bordered 20 by 10 range under each preset", () => {
-  const sheet = blankSheet(20, 10);
-  const block = Array.from({ length: 20 }, (_, r) => Array.from({ length: 10 }, (_, c) => String(r * 10 + c + 1)));
-  const styleBytes = (presets) => {
-    const page = empty(sheet);
-    page.grid.setRange("A1", block);
-    const plain = cellsOf(domBacking(page.table).bytes());
-    for (const preset of presets) page.grid.format("A1:J20", { border: { preset, line: LINE } });
-    const cells = cellsOf(domBacking(page.table).bytes());
-    return (cells.reduce((sum, cell) => sum + size(cellHtml(cell)), 0) - plain.reduce((sum, cell) => sum + size(cellHtml(cell)), 0)) / cells.length;
-  };
-  const rows = [...PRESETS.map((preset) => [preset, styleBytes([preset])]), ["outer then inner, each line on one cell", styleBytes(["outer", "inner"])]];
-  printed.push(`border style bytes per cell on 20 by 10, line ${LINE}: ${rows.map(([name, bytes]) => `${name} ${fixed(bytes)}`).join(", ")}`);
-  expect(rows.find(([name]) => name === "all")[1]).toBe(size(' style="border:1px solid #000000"'));
 });

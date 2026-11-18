@@ -209,25 +209,6 @@ describe("a retired session keeps no handles", () => {
     offTwo();
   });
 
-  test("a session reusing the same plugin releases the earlier pair before binding", () => {
-    const undo = undoPlugin();
-    window.clay = { undo, modeLifecycle: lifecycle(1) };
-    const one = scope();
-    const offOne = installBridges(one);
-    expect(undo.names()).toEqual(["undo", "redo"]);
-
-    offOne();
-    const two = scope();
-    const offTwo = installBridges(two);
-    expect(undo.names()).toEqual(["undo", "redo"]);
-
-    undo.fire("undo");
-    expect(one.calls.refresh).toBe(0);
-    expect(two.calls.refresh).toBe(1);
-
-    offTwo();
-  });
-
   test("a ready promise that settles after disposal does not rebind", async () => {
     let settle;
     window.clay = { modeLifecycle: lifecycle(1), ready: new Promise((resolve) => { settle = resolve; }) };

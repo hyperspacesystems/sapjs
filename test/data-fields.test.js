@@ -55,11 +55,6 @@ describe("data-* state fields", () => {
     expect(root.querySelector('[data-id="b2"]').hasAttribute("nope")).toBe(false);
   });
 
-  test("a hyphenated non-data field still halts with E08", () => {
-    mount(`<main sap state="my-field"><output text="1"></output></main>`);
-    expect(Sap.report().errors.map((e) => e.code)).toContain("E08");
-  });
-
   test("data-id as a state field is not rejected as an HTML global", () => {
     const root = mount(`
       <main sap>

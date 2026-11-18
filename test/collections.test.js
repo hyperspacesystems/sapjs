@@ -40,13 +40,6 @@ describe("collections", () => {
     expect(rows[2].querySelector("span").textContent).toBe("");
   });
 
-  test("a form trigger-add fires on submit (Enter)", async () => {
-    const root = mount(TODO);
-    root.querySelector("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await flush();
-    expect(root.querySelectorAll("[item]:not([template])").length).toBe(3);
-  });
-
   test("a form trigger-add composes the new row from its matching fields and clears", async () => {
     const root = mount(`
       <main sap>

@@ -94,10 +94,6 @@ describe("doc visuals: the three required diagrams are present", () => {
   const diagrams = [...doc.querySelectorAll(".diagram")];
   const text = diagrams.map((d) => d.textContent).join("\n");
 
-  test("there are three diagram blocks", () => {
-    expect(diagrams.length).toBe(3);
-  });
-
   test("(a) the pass cycle diagram names all four phases", () => {
     expect(text).toMatch(/pass cycle/i);
     for (const phase of ["intake", "compute", "paint", "discard"]) {

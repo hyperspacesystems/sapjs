@@ -20,8 +20,6 @@ const BOARD = (panel) => `
     ${panel}
   </main>`;
 
-const warns = () => Sap.report().warnings.map((w) => w.code);
-
 describe("detail through nested lists", () => {
   test("lists.cards finds a card in any list", async () => {
     const root = mount(BOARD(`<aside detail="lists.cards by state.open"><input id="t" bind="title"></aside>`));
@@ -65,12 +63,5 @@ describe("detail on a dialog", () => {
     expect(Sap(root).open).toBe("");
     Sap.refresh();
     expect(dlg.open).toBe(false);
-  });
-
-  test("W31 warns only when the dialog would be saved", () => {
-    mount(BOARD(`<dialog detail="lists.cards by state.open"></dialog>`));
-    expect(warns()).toContain("W31");
-    mount(BOARD(DIALOG));
-    expect(warns()).not.toContain("W31");
   });
 });

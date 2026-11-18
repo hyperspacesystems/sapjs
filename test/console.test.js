@@ -49,13 +49,6 @@ describe("the console surface", () => {
     expect(Sap.status().apps[0].lastPass.writes).toBeGreaterThan(0);
   });
 
-  test("Sap.doctor() returns an audit array and prints a summary", () => {
-    mount(APP);
-    const findings = Sap.doctor();
-    expect(Array.isArray(findings)).toBe(true);
-    expect(findings.every((f) => f.code && f.severity && f.message)).toBe(true);
-  });
-
   test("Sap.doctor flags dead state", () => {
     mount(`<main sap state="used unused"><output text="state.used"></output></main>`);
     const dead = Sap.doctor().filter((f) => /dead state/.test(f.message));

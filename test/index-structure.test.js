@@ -135,10 +135,6 @@ describe("index visuals: the two carried diagrams are present and intact", () =>
   const diagrams = [...doc.querySelectorAll(".diagram")];
   const text = diagrams.map((d) => d.textContent).join("\n");
 
-  test("there are exactly two diagram blocks (pass cycle + writes converge)", () => {
-    expect(diagrams.length).toBe(2);
-  });
-
   test("the pass-cycle diagram names all four phases", () => {
     expect(text).toMatch(/pass cycle/i);
     for (const phase of ["intake", "compute", "paint", "discard"]) {

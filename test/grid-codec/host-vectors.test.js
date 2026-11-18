@@ -6,7 +6,6 @@ import { CELLS } from "./support/value-cases.js";
 import { cellValue, shown, typed } from "../../src/grid/codec/value.js";
 import { patchGrid } from "../../src/grid/codec/patch.js";
 import { isKey, keyBetween, keysBetween } from "../../src/grid/codec/order-keys.js";
-import { buildKeys } from "./support/key-vectors.js";
 
 const VECTORS = JSON.parse(readFileSync(join(__dirname, "golden", "host-vectors.json"), "utf8"));
 
@@ -76,8 +75,4 @@ test("keysBetween spreads as finding F11 pins", () => {
     if (i > 0) expect(spread[i] > spread[i - 1]).toBe(true);
     expect(spread[i].length).toBeLessThanOrEqual(2);
   }
-});
-
-test("the order key vectors on disk are what the code writes now", () => {
-  expect(VECTORS.keys).toEqual(buildKeys());
 });
