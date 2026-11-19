@@ -25,6 +25,7 @@ import { colName } from "../../../../src/grid/a1.js";
 import { gridModel } from "../../../../src/grid/codec/read.js";
 import { tableHtml } from "../../../../src/grid/codec/write.js";
 import { keysBetween } from "../../../../src/grid/codec/order-keys.js";
+import { docOf, sheetCodec } from "../../../../src/grid/room-codec.js";
 
 const STEPS = 40;
 
@@ -274,18 +275,30 @@ export function run(...args) {
   }
 }
 
-function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing = false } = {}) {
+function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing = false, revert = false } = {}) {
   const rand = rng(seed);
   idn = 0;
-  const wb = modelWorkbook([makeSheet("s1", "Budget", "A", 10, 5, rand), makeSheet("s2", "Notes tab", "B", 8, 4, rand)]);
+  let wb = modelWorkbook([makeSheet("s1", "Budget", "A", 10, 5, rand), makeSheet("s2", "Notes tab", "B", 8, 4, rand)]);
   addFormulas(wb, rand, 14);
-  const engine = computing ? createEngine(wb) : null;
+  // With `revert` (out of order only) every action and undo goes through the room codec, as in a
+  // room: an undo is the codec's guarded revert, and the control empties the revert step's restore.
+  // The codec builds a new workbook for each step, so no running engine follows it.
+  const viaCodec = revert && !strict;
+  const engine = computing && !viaCodec ? createEngine(wb) : null;
   engine?.load();
   const settled = (step) => {
     if (engine === null) return null;
     const off = computesAgain(wb, engine);
     return off === null ? null : { seed, fail: "E1 a full computation differs from the running engine", step, ...off };
   };
+  const applyOne = (step) => {
+    if (!viaCodec) return applyWorkbook(wb, step, { engine });
+    const doc = docOf(wb);
+    const out = sheetCodec.apply(doc, step);
+    if (out.out === "applied") wb = modelWorkbook(doc.tabs);
+    return out;
+  };
+  const naiveOf = (inverse) => (!viaCodec ? { action: inverse.action, restore: [] } : inverse.step ? { ...inverse, step: { ...inverse.step, restore: [] } } : inverse);
   const first = bytes(wb);
   const m0 = meanings(wb);
   const expect = new Map(m0);
@@ -295,8 +308,8 @@ function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing
     if (!strict && log.some((entry) => !entry.undone) && rand() < 0.3) {
       const open = log.filter((entry) => !entry.undone);
       const pick = open[Math.floor(rand() * open.length)];
-      const inv = naive ? { action: pick.inverse.action, restore: [] } : pick.inverse;
-      const out = applyWorkbook(wb, inv, { engine });
+      const inv = naive ? naiveOf(pick.inverse) : pick.inverse;
+      const out = applyOne(inv);
       if (out.out !== "applied") continue;
       const off = settled(step);
       if (off !== null) return off;
@@ -328,15 +341,15 @@ function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing
       if (action === null || action === undefined) continue;
       // P4: the same action on a workbook read back from its bytes gives the same bytes.
       const twin = twinOf(wb);
-      const twinEngine = computing ? createEngine(twin) : null;
+      const twinEngine = engine === null ? null : createEngine(twin);
       twinEngine?.load();
-      const out = applyWorkbook(wb, action, { engine });
+      const out = applyOne(action);
       if (out.out !== "applied") continue;
       const off = settled(step);
       if (off !== null) return { ...off, action: JSON.stringify(action).slice(0, 300) };
-      const out2 = applyWorkbook(twin, action, { engine: twinEngine });
+      const out2 = viaCodec ? out : applyWorkbook(twin, action, { engine: twinEngine });
       if (out2.out === "applied" && JSON.stringify(out2.inverse) !== JSON.stringify(out.inverse)) return { seed, fail: "P6 inverse differs on a twin read from bytes", step };
-      if (out2.out !== "applied" || bytes(twin) !== bytes(wb)) return { seed, fail: "P4 a twin read from bytes writes other bytes", step };
+      if (!viaCodec && (out2.out !== "applied" || bytes(twin) !== bytes(wb))) return { seed, fail: "P4 a twin read from bytes writes other bytes", step };
       const entry = { action, inverse: out.inverse };
       if (action.t === "set") {
         const now = meanings(wb);
@@ -374,8 +387,8 @@ function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing
   for (let i = log.length - 1; i >= 0; i--) {
     const entry = log[i];
     if (entry.undone) continue;
-    const inv = naive ? { action: entry.inverse.action, restore: [] } : entry.inverse;
-    const out = applyWorkbook(wb, inv, { engine });
+    const inv = naive ? naiveOf(entry.inverse) : entry.inverse;
+    const out = applyOne(inv);
     if (out.out !== "applied") {
       if (strict) return { seed, fail: "P3 an undo was refused", code: out.code, step: i };
       return null;

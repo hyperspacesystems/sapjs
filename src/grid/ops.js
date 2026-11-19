@@ -581,7 +581,7 @@ const contentOf = (cell) => {
 };
 
 // A formula restored by an inverse carries the stored result the cell had, so its bytes come back.
-const inverseContent = (cell) => {
+export const inverseContent = (cell) => {
   if (!cell || cell.hidden) return null;
   if (cell.f === undefined) return typed(cell.v ?? cell.text, cell.t === true);
   if (cell.text === undefined && cell.v === undefined && cell.n === undefined) return { f: cell.f };
@@ -852,7 +852,7 @@ function growMergeCols(backing, action, box, at, cells) {
   }
 }
 
-function orderedRows(backing, records) {
+export function orderedRows(backing, records) {
   const order = backing.rows().map((row) => ({ id: row.id, pos: row.pos }));
   for (const record of records) {
     if (record.pos === undefined) continue;
@@ -864,7 +864,7 @@ function orderedRows(backing, records) {
   return order.map((row) => row.id);
 }
 
-function orderedCols(backing, records) {
+export function orderedCols(backing, records) {
   const order = backing.cols().map((col) => ({ id: col.id, pos: col.pos }));
   for (const record of records) {
     if (record.pos === undefined) continue;
@@ -879,7 +879,7 @@ function orderedCols(backing, records) {
 // The frozen line is a row line only: frozen rows are written in their own row group and a cell
 // cannot span two groups, so a vertical merge across it cannot be drawn. Frozen columns are sticky
 // styles alone, so nothing structural stops a merge from crossing the freezeCols line.
-function boxesApart(backing, order, axis) {
+export function boxesApart(backing, order, axis) {
   const frozen = axis === "rows" ? backing.frozen().rows : Infinity;
   for (const box of mergeBoxes(backing)) {
     const first = axis === "rows" ? box.row : box.col;
@@ -1361,7 +1361,7 @@ function writeChangeCols(backing, action, { derive, formulas }) {
   return { out: "applied", inverse, changes: { rows: [], cols, cells } };
 }
 
-function mergeBoxes(backing) {
+export function mergeBoxes(backing) {
   const boxes = [];
   backing.rows().forEach((row, r) => {
     row.cells.forEach((cell, c) => {
@@ -1403,7 +1403,7 @@ const carriedText = (cell, col) => {
   return fmt !== null && !isBuiltin(fmt) ? cell.text : undefined;
 };
 
-const cellExtra = (cell, col) => {
+export const cellExtra = (cell, col) => {
   const extra = { fmt: cell.fmt !== undefined ? cell.fmt : null };
   const css = cssOf(cell.style);
   if (css !== undefined) extra.css = css;
@@ -1414,7 +1414,7 @@ const cellExtra = (cell, col) => {
 
 // Only the row line can cut a merge: a merge across the freezeCols line is drawn, so a freeze of
 // columns never refuses for one.
-const cutsFrozen = (backing, rows) =>
+export const cutsFrozen = (backing, rows) =>
   mergeBoxes(backing).some((box) => box.rs > 1 && box.row < rows && box.bottom >= rows);
 
 // A merge names the non-blank cells it clears in `clears`, because co-editing finds conflicts with
@@ -1423,7 +1423,7 @@ const cutsFrozen = (backing, rows) =>
 const notBlank = (cell) => cell !== null && cell !== undefined && !blank(cell);
 
 // The cells inside a rectangle other than its anchor that hold content, fmt or style.
-function clearedBetween(backing, top, bottom, left, right) {
+export function clearedBetween(backing, top, bottom, left, right) {
   const rows = backing.rows();
   const cols = backing.cols();
   const out = [];

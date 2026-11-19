@@ -728,3 +728,61 @@ export function originalSlots(f, homeId, frame) {
   }
   return { skeleton: s.skeleton, keys: s.keys, nodes, refs, src: s.src };
 }
+
+// A formula moved by a sort, as a copy moves it: every row number not marked `$` moves by `delta`.
+// A row that would go above row 1 makes its reference #REF!. Text that does not parse is kept.
+export function shiftRows(f, delta) {
+  if (delta === 0) return f;
+  const src = f.slice(1);
+  const parsed = parse(src);
+  if (parsed.error) return f;
+  let out = "";
+  let at = 0;
+  for (const node of parsed.refs) {
+    const text = src.slice(node.span[0], node.span[1]);
+    let moved = "";
+    let from = 0;
+    let dead = false;
+    for (const token of tokenize(text)) {
+      if (token.type !== "cell" && token.type !== "row") continue;
+      if (token.absRow || token.row === undefined || token.row === null) continue;
+      const digits = /\d+$/.exec(text.slice(token.start, token.end));
+      if (digits === null) continue;
+      const row = token.row + delta;
+      if (row < 1) dead = true;
+      const end = token.end;
+      moved += text.slice(from, end - digits[0].length) + String(row);
+      from = end;
+    }
+    out += src.slice(at, node.span[0]) + (dead ? "#REF!" : moved + text.slice(from));
+    at = node.span[1];
+  }
+  return "=" + out + src.slice(at);
+}
+
+// What a formula means, as one string: its text with each reference replaced by its kind (a cell or
+// a range) and the ids it binds to in `frame`, each range's corners in a fixed order, and an end past
+// the sheet's edge written as its typed row number or column letters. Two formulas mean the same
+// exactly when these are equal.
+export function meaning(f, homeId, frame) {
+  const bound = bind(f, homeId, frame);
+  if (bound === null) return `!${f}`;
+  const src = f.slice(1);
+  let out = "";
+  let at = 0;
+  bound.parsed.refs.forEach((node, i) => {
+    const ref = bound.refs[i];
+    const from = node.type === "ref" ? node : node.from;
+    const to = node.type === "ref" ? node : node.to;
+    const end = (id, typed) => (id === undefined ? `~${typed}` : id === null ? "" : id);
+    // A reference to a tab no tab is named keeps its typed corners: =Q2!B2 and =Q2!C50 differ.
+    const corners = ref.unbound
+      ? [`~${ref.name.toLowerCase()}`, ...[from.row ?? "", to.row ?? ""].sort(), ...[from.col ?? "", to.col ?? ""].sort()]
+      : [ref.s, ...[end(ref.r0, from.row), end(ref.r1, to.row)].sort(), ...[end(ref.c0, from.col), end(ref.c1, to.col)].sort()];
+    const lock = (one) => `${one.absCol ? "$" : ""}:${one.absRow ? "$" : ""}`;
+    const key = [node.type, ...corners, ...[lock(from), lock(to)].sort()].join("|");
+    out += src.slice(at, node.span[0]) + `\u0001${key}\u0001`;
+    at = node.span[1];
+  });
+  return out + src.slice(at);
+}

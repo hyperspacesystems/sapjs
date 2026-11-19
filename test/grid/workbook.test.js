@@ -1,4 +1,4 @@
-import { applyWorkbook, domWorkbook, modelWorkbook } from "../../src/grid/index.js";
+import { applyWorkbook, createEngine, domWorkbook, modelWorkbook } from "../../src/grid/index.js";
 import { buildDeleteCols, buildDeleteRows, buildInsertCols, buildInsertRows, buildMoveCols, buildMoveRows, buildSet } from "../../src/grid/build.js";
 import { colName } from "../../src/grid/a1.js";
 import { gridModel } from "../../src/grid/codec/read.js";
@@ -353,4 +353,117 @@ test("a refused undo leaves no stale mark from the formula it brought back", () 
   const out = applyWorkbook(wb, removed.inverse);
   expect([out.out, out.code]).toEqual(["refused", "rewrite_failed"]);
   expect(bytes(wb)).toBe(first);
+});
+
+const unstaled = (html) => html.replaceAll("<table grid stale>", "<table grid>");
+
+test("a sort moves whole rows: a formula inside the block keeps pointing at its own row, one outside keeps its address, and undo gives the bytes back", () => {
+  const wb = modelWorkbook([
+    { id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 4, 3, { "0,1": number(30), "0,2": { text: "", f: "=B1*2" }, "1,1": number(10), "1,2": { text: "", f: "=B2*2" }, "2,1": number(20), "2,2": { text: "", f: "=B3*2" }, "3,1": { text: "", f: "=B1" } }) },
+    { id: "s2", name: "Notes", pos: "B", sheet: sheetOf("s2", 1, 1, { "0,0": { text: "", f: "=Budget!B1" } }) },
+  ]);
+  const before = bytes(wb);
+  const out = applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["s1r2", "s1r3", "s1r1"], cols: null });
+  expect(out.out).toBe("applied");
+  expect(tabOf(wb, "s1").backing.rows().map((row) => row.id)).toEqual(["s1r2", "s1r3", "s1r1", "s1r4"]);
+  expect(["s1r2", "s1r3", "s1r1"].map((row) => formulaAt(wb, "s1", row, "s1c3"))).toEqual(["=B1*2", "=B2*2", "=B3*2"]);
+  expect(formulaAt(wb, "s1", "s1r4", "s1c2")).toBe("=B1");
+  expect(formulaAt(wb, "s2", "s2r1", "s2c1")).toBe("=Budget!B1");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(unstaled(bytes(wb))).toBe(unstaled(before));
+});
+
+test("a sort of some columns moves content between the rows, and a formula pushed above row 1 comes back whole on undo", () => {
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 3, 2, { "0,0": { text: "a" }, "0,1": number(1), "1,0": { text: "b" }, "1,1": number(2), "2,0": { text: "c" }, "2,1": { text: "", f: "=A1+A2" } }) }]);
+  const before = bytes(wb);
+  const out = applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["s1r3", "s1r1", "s1r2"], cols: ["s1c2"] });
+  expect(out.out).toBe("applied");
+  expect(formulaAt(wb, "s1", "s1r1", "s1c2")).toBe("=#REF!+#REF!");
+  expect(tabOf(wb, "s1").backing.cell(0, 0).text).toBe("a");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(unstaled(bytes(wb))).toBe(unstaled(before));
+});
+
+test("a batch's undo that brings a row back and then a formula naming it gives the formula back", () => {
+  const wb = book();
+  const out = applyWorkbook(wb, { v: 1, t: "batch", actions: [{ v: 1, t: "set", sheet: "s1", cells: [["s1r6", "s1c2", "gone"]] }, { v: 1, t: "deleteRows", sheet: "s1", rows: ["s1r1"] }] });
+  expect(out.out).toBe("applied");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect([formulaAt(wb, "s1", "s1r6", "s1c2"), formulaAt(wb, "s2", "s2r1", "s2c2")]).toEqual(["=SUM(B1:B5)", "=Budget!B6"]);
+});
+
+test("a row inserted in one tab still moves a formula in another tab's row that has the same id", () => {
+  const wb = modelWorkbook([
+    { id: "s1", name: "Budget", pos: "A", sheet: budget() },
+    { id: "s2", name: "Copy", pos: "B", sheet: sheetOf("cp", 2, 2, { "1,1": { text: "", f: "=Budget!B1" } }) },
+  ]);
+  expect(applyWorkbook(wb, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "cpr2", pos: "5" }] }).out).toBe("applied");
+  expect(formulaAt(wb, "s2", "cpr2", "cpc2")).toBe("=Budget!B2");
+});
+
+test("a rename's undo keeps a typed spelling of the tab's name", () => {
+  const wb = modelWorkbook([
+    { id: "s1", name: "NOTES", pos: "A", sheet: sheetOf("s1", 1, 1, { "0,0": number(5) }) },
+    { id: "s2", name: "Sum", pos: "B", sheet: sheetOf("s2", 1, 1, { "0,0": { text: "", f: "=Notes!A1" } }) },
+  ]);
+  const before = bytes(wb);
+  const out = applyWorkbook(wb, { v: 1, t: "renameSheet", sheet: "s1", name: "Notes" });
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(formulaAt(wb, "s2", "s2r1", "s2c1")).toBe("=Notes!A1");
+  expect(unstaled(bytes(wb))).toBe(unstaled(before));
+});
+
+test("a redo after a coworker moved a row in gives back the total's range, not one that takes in the moved row", () => {
+  const rows = ["r1", "r2", "r3", "r4", "r5"].map((id, i) => ({ id, pos: "BCDEF"[i], cells: [null, number((i + 1) * 10)] }));
+  rows.push({ id: "r6", pos: "G", cells: [{ text: "Total" }, { text: "", f: "=SUM(B1:B3)" }] });
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: { cols: [{ id: "a", pos: "A" }, { id: "b", pos: "B" }], rows } }]);
+  const removed = applyWorkbook(wb, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r1"] });
+  applyWorkbook(wb, { v: 1, t: "changeRows", sheet: "s1", rows: [{ id: "r5", pos: "BV" }] });
+  const before = unstaled(bytes(wb));
+  const undo = applyWorkbook(wb, removed.inverse);
+  expect(formulaAt(wb, "s1", "r6", "b")).toBe("=SUM(B1:B4)");
+  expect(applyWorkbook(wb, undo.inverse).out).toBe("applied");
+  expect(formulaAt(wb, "s1", "r6", "b")).toBe("=SUM(B2:B3)");
+  expect(unstaled(bytes(wb))).toBe(before);
+});
+
+test("a batch's own set keeps its cell's old formula on undo, not a restore entry of the set's formula", () => {
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 2, 2, { "0,0": number(5), "0,1": { text: "5", n: true, f: "=A1" }, "1,0": number(6) }) }]);
+  const out = applyWorkbook(wb, { v: 1, t: "batch", actions: [{ v: 1, t: "set", sheet: "s1", cells: [["s1r1", "s1c2", { f: "=a1" }]] }, { v: 1, t: "deleteRows", sheet: "s1", rows: ["s1r2"] }] });
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(formulaAt(wb, "s1", "s1r1", "s1c2")).toBe("=A1");
+});
+
+test("a batch that sets a range with an end past the edge and deletes a row prints the range as two steps would", () => {
+  const sheet = () => sheetOf("s1", 4, 2, { "0,0": number(1), "1,0": number(2), "2,0": number(3), "3,0": number(4) });
+  const set = { v: 1, t: "set", sheet: "s1", cells: [["s1r1", "s1c2", { f: "=SUM(A3:A10)", refs: [["s1", "s1r3", "s1c1", 0, "s1c1"]] }]] };
+  const remove = { v: 1, t: "deleteRows", sheet: "s1", rows: ["s1r3"] };
+  const one = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheet() }]);
+  expect(applyWorkbook(one, { v: 1, t: "batch", actions: [set, remove] }).out).toBe("applied");
+  const two = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheet() }]);
+  applyWorkbook(two, set);
+  applyWorkbook(two, remove);
+  expect([formulaAt(one, "s1", "s1r1", "s1c2"), formulaAt(two, "s1", "s1r1", "s1c2")]).toEqual(["=SUM(A3:A10)", "=SUM(A3:A10)"]);
+});
+
+test("a whole-width sort with an engine open computes the formulas outside the block over the rows now at their addresses", () => {
+  const wb = modelWorkbook([
+    { id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 4, 2, { "0,1": number(30), "1,1": number(10), "2,1": number(20), "3,0": { text: "", f: "=SUM(B1:B2)" }, "3,1": { text: "", f: "=B1" } }) },
+    { id: "s2", name: "Sum", pos: "B", sheet: sheetOf("s2", 1, 1, { "0,0": { text: "", f: "=Budget!B1" } }) },
+  ]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["s1r2", "s1r3", "s1r1"], cols: null }, { engine }).out).toBe("applied");
+  expect([engine.result("s1", "s1r4", "s1c1"), engine.result("s1", "s1r4", "s1c2"), engine.result("s2", "s2r1", "s2c1")]).toEqual([30, 10, 10]);
+  engine.dispose();
+});
+
+test("a sort that would move a frozen row, cut a merge or name a missing column is refused and changes nothing", () => {
+  const wb = book();
+  expect(applyWorkbook(wb, { v: 1, t: "freeze", sheet: "s1", rowsThrough: "s1r1" }).out).toBe("applied");
+  expect(applyWorkbook(wb, { v: 1, t: "merge", sheet: "s1", from: ["s1r3", "s1c1"], to: ["s1r4", "s1c1"], clears: [] }).out).toBe("applied");
+  const before = bytes(wb);
+  const sort = (rows, cols) => applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows, cols }).code;
+  expect([sort(["s1r2", "s1r1"], null), sort(["s1r3", "s1r2"], null), sort(["s1r5", "s1r2"], ["s1c2", "s1c9"]), sort(["s1r4", "s1r2"], ["s1c1"])]).toEqual(["bad_action", "merge_cut", "missing_col", "covered_cell"]);
+  expect(bytes(wb)).toBe(before);
 });

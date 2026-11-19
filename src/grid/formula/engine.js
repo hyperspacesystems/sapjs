@@ -666,7 +666,10 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
           seeds.push(key);
         }
       }
-      for (const id of changed.sheets) {
+      // A whole-width sort moves row records under formulas that keep their text, so every formula
+      // on the sorted tab binds again from its text, and so does every formula naming that tab.
+      const sorted = new Set(changed.sorted ?? []);
+      for (const id of new Set([...changed.sheets, ...sorted])) {
         const tab = tabs.get(id);
         if (tab === undefined) continue;
         for (const [key, entry] of [...formulas]) if (entry.sheet === id) remove(key);
@@ -687,7 +690,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
       };
       const renamed = changed.sheets.length > 0;
       for (const entry of [...formulas.values()]) {
-        if (entry.floating || (renamed && entry.named) || lost(entry)) {
+        if (entry.floating || (renamed && entry.named) || (entry.named && entry.refs.some((ref) => sorted.has(ref.s))) || lost(entry)) {
           const again = add(entry.sheet, entry.row, entry.col, entry.f);
           if (entry.floating || meaning(again) !== meaning(entry)) seeds.push(again.key);
         }

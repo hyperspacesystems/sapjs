@@ -22,6 +22,7 @@ import { addFunctions } from "../grid/formula/functions.js";
 import { tokenize } from "../grid/formula/text.js";
 import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
+import { sheetCodec } from "../grid/room-codec.js";
 import { MANIFEST } from "../plugin-manifest.js";
 
 const TABLE = "table[grid]";
@@ -59,6 +60,8 @@ export default {
       csv: { detectDelimiter, parseDelimited, writeDelimited, protectField },
       newId,
       createSheetWriter: () => createSheetWriter(),
+      // The sheet's codec for a ClayJS room: `clay.liveRoom(name, { codec: Sap.grid.roomCodec, ... })`.
+      roomCodec: sheetCodec,
       // Every tab under `root` as one workbook with one formula engine (`createSheets`), each
       // table's Grid known to the plugin as `Sap.grid(table)` gives it. `extra` holds the host's
       // own options: `locale` ("de"), `quiet(fn)` for load results that changed only through

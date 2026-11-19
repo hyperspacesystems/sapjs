@@ -15,8 +15,9 @@
 import { gridModel } from "./codec/read.js";
 import { isKey } from "./codec/order-keys.js";
 import { contentOf, derive as defaultDerive } from "./content.js";
-import { apply, GridRefused } from "./ops.js";
-import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, print, restoreSlots, slotsOf } from "./formula/text.js";
+import { apply, cellExtra, GridRefused, inverseContent } from "./ops.js";
+import { modelBacking } from "./backing-model.js";
+import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, print, restoreSlots, shiftRows, slotsOf } from "./formula/text.js";
 
 const STRUCTURAL = new Set(["insertRows", "deleteRows", "changeRows", "insertCols", "deleteCols", "changeCols"]);
 const TAB = new Set(["insertSheet", "deleteSheet", "renameSheet", "moveSheet"]);
@@ -45,30 +46,73 @@ function* formulaCells(tabs) {
 }
 
 // A formula's A1 text for `frame`, printed from the ids it carries. Text that already binds to those
-// ids is kept as typed, so a spelling the printer would not write survives.
-function printIds(f, refs, sheetId, frame) {
+// ids is kept as typed, so a spelling the printer would not write survives. `was` is the frame the
+// ids were last true in, for the floating reference rules (an end past the edge, rule 2).
+function printIds(f, refs, sheetId, frame, was = null) {
   const now = bind(f, sheetId, frame);
   if (now !== null && JSON.stringify(idsOf(now)) === JSON.stringify(refs)) return f;
   const bound = fromIds(f, refs);
-  return bound === null ? null : print(bound, sheetId, null, frame);
+  return bound === null ? null : print(bound, sheetId, was, frame);
 }
 
-// The action with each set's formulas made into A1 for `frame`.
-function printSets(action, frame) {
-  if (action.t === "batch") return { ...action, actions: action.actions.map((one) => printSets(one, frame)) };
-  if (action.t !== "set") return action;
+// A set's formulas made into A1 for the frames `framesFor(entry)` gives: `[was, now]`.
+function printSet(action, framesFor) {
   return {
     ...action,
     cells: action.cells.map((entry) => {
       const content = entry[2];
       if (content === null || typeof content !== "object" || content.refs === undefined) return entry;
-      const text = printIds(content.f, content.refs, action.sheet, frame);
+      const [was, now] = framesFor(entry);
+      const text = printIds(content.f, content.refs, action.sheet, now, was);
       if (text === null) throw new GridRefused("bad_action", "a formula's refs do not match its references");
       const { refs, ...rest } = content;
       return [entry[0], entry[1], { ...rest, f: text }, ...entry.slice(3)];
     }),
   };
 }
+
+const refsOf = (content) => (content !== null && typeof content === "object" && Array.isArray(content.refs) ? content.refs : null);
+const setsOf = (action) => (action.t === "batch" ? action.actions : [action]).filter((one) => one.t === "set");
+
+// The action with each set's formulas made into A1. A formula is printed in the frame before the
+// action, and the rewrite after it moves the text to the frame after, like every other formula. A
+// formula whose ids name a row or column that is not there before the action (an undo that brings
+// a row back in one part of a batch and puts back a formula naming it in another), or an end past
+// the sheet's edge (0), cannot be printed there, so it is printed in the frame after the action,
+// found on a copy of the tab, and `late` tells the rewrite to leave that cell as it is.
+function printSets(action, wb, tab) {
+  const late = new Set();
+  const before = frameOf(wb);
+  const known = (ref) => {
+    if (!Array.isArray(ref) || ref[0] === "~") return true;
+    const one = wb.sheets().find((t) => t.id === ref[0]);
+    if (!one) return true;
+    const row = (id) => id === null || (typeof id === "string" && one.backing.rowIndex(id) >= 0);
+    const col = (id) => id === null || (typeof id === "string" && one.backing.colIndex(id) >= 0);
+    return row(ref[1]) && row(ref[3]) && col(ref[2]) && col(ref[4]);
+  };
+  for (const one of setsOf(action)) for (const entry of one.cells) if (refsOf(entry[2])?.some((ref) => !known(ref))) late.add(cellKey(one.sheet, entry[0], entry[1]));
+  let after = before;
+  if (late.size > 0 && structural(action)) {
+    const scratch = modelBacking(tab.backing.sheet, { sheetId: tab.id });
+    if (apply(scratch, withoutRefs(action), { derive: defaultDerive, formulas: {} }).out === "applied") {
+      after = frameFrom(wb.sheets().map((one) => {
+        const b = one.id === tab.id ? scratch : one.backing;
+        return { id: one.id, name: one.name, rows: b.rows().map((row) => row.id), cols: b.cols().map((col) => col.id) };
+      }));
+    }
+  }
+  if (after === before) late.clear();
+  const each = (one) => (one.t !== "set" ? one : printSet(one, (entry) => (late.has(cellKey(one.sheet, entry[0], entry[1])) ? [before, after] : [null, before])));
+  return { printed: action.t === "batch" ? { ...action, actions: action.actions.map(each) } : each(action), late };
+}
+
+const withoutRefs = (action) => {
+  const plain = (one) => (one.t !== "set" ? one : { ...one, cells: one.cells.map((entry) => (refsOf(entry[2]) === null ? entry : [entry[0], entry[1], (({ refs, ...rest }) => rest)(entry[2]), ...entry.slice(3)])) });
+  return action.t === "batch" ? { ...action, actions: action.actions.map(plain) } : plain(action);
+};
+
+const cellKey = (sheet, row, col) => `${sheet}\u0000${row}\u0000${col}`;
 
 // A set's inverse with each formula it puts back carried with the ids it means in `frame`, the
 // frame before the set, so an undo delivered after a peer's structural edit means what was there.
@@ -118,13 +162,15 @@ function deletedFormulas(wb, action) {
   return out;
 }
 
-// The ids of the rows and columns an action brings in: their cells come with the action.
+// The rows and columns an action brings in, by tab and id (two tabs may hold the same row id, as a
+// copied tab does): their cells come with the action.
+const recordKey = (sheet, id) => `${sheet}\u0000${id}`;
 function insertedIds(action) {
   const out = new Set();
   const walk = (one) => {
     if (one.t === "batch") return one.actions.forEach(walk);
-    if (one.t === "insertRows" || one.t === "set") (one.rows ?? []).forEach((row) => out.add(row.id));
-    if (one.t === "insertCols" || one.t === "set") (one.cols ?? []).forEach((col) => out.add(col.id));
+    if (one.t === "insertRows" || one.t === "set") (one.rows ?? []).forEach((row) => out.add(recordKey(one.sheet, row.id)));
+    if (one.t === "insertCols" || one.t === "set") (one.cols ?? []).forEach((col) => out.add(recordKey(one.sheet, col.id)));
   };
   walk(action);
   return out;
@@ -137,11 +183,10 @@ export function applyWorkbook(wb, step, { derive = defaultDerive, engine = null 
   // Each tab's stale mark before the step: the reducer marks a tab stale on a formula write, and a
   // refused step leaves every tab as it was, the mark too.
   const stale = new Map(wb.sheets().map((tab) => [tab.id, tab.backing.sheet.stale === true]));
-  const run = { wb, derive, computed: engine !== null, stale, journal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false } };
+  const run = { wb, derive, computed: engine !== null, stale, journal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false, sorted: [] } };
   let out;
   try {
-    if (action.t === "sort") return refusal("bad_action", "sort comes with the room codec");
-    out = TAB.has(action.t) ? applyTab(run, action, restore) : applySheet(run, action, restore);
+    out = action.t === "sort" ? applySort(run, action, restore) : TAB.has(action.t) ? applyTab(run, action, restore) : applySheet(run, action, restore);
   } catch (err) {
     takeBack(run);
     if (err instanceof GridRefused) return refusal(err.code, err.detail);
@@ -186,7 +231,7 @@ function applySheet(run, action, restore) {
   const tab = wb.sheets().find((t) => t.id === sheetOf(action));
   if (!tab) return refusal("missing_sheet", `no tab ${JSON.stringify(sheetOf(action))}`);
   const before = frameOf(wb);
-  const printed = printSets(action, before);
+  const { printed, late } = printSets(action, wb, tab);
   const moves = structural(action);
   const gone = moves ? deletedFormulas(wb, action) : [];
   const out = apply(tab.backing, printed, { derive, formulas: {}, computed });
@@ -197,7 +242,8 @@ function applySheet(run, action, restore) {
   for (const change of out.changes.cols ?? []) run.changed.cols.push({ ...change, sheet: tab.id });
   for (const change of out.changes.table ?? []) run.changed.table.push({ ...change, sheet: tab.id });
   run.changed.structure = moves;
-  const back = moves || restore.length > 0 ? rewriteAll(run, before, frameOf(wb), gone, insertedIds(action), restore) : [];
+  const own = new Set(setsOf(action).flatMap((one) => one.cells.map((entry) => cellKey(one.sheet, entry[0], entry[1]))));
+  const back = moves || restore.length > 0 ? rewriteAll(run, before, frameOf(wb), gone, insertedIds(action), restore, { late, own }) : [];
   return { out: "applied", inverse: { action: bindSetInverse(out.inverse, before), restore: back }, changed: run.changed };
 }
 
@@ -228,6 +274,7 @@ function applyTab(run, action, restore) {
     if (action.t === "renameSheet") {
       if (taken(action.name)) return refusal("name_taken", `a tab is named ${JSON.stringify(action.name)}`);
       inverse = { v: 1, t: "renameSheet", sheet: id, name: tab.name };
+      run.renamed = true;
       wb.renameSheet(id, action.name);
       run.undo = () => wb.renameSheet(id, inverse.name);
     } else if (action.t === "moveSheet") {
@@ -250,13 +297,27 @@ function applyTab(run, action, restore) {
 // What is wrong with a tab action's shape, or null. Both workbooks take only what both read the same
 // way: a tab's bytes must be the codec's (the strict reader takes them), its key an order key, its
 // id not the mark of an unknown tab name in ids.
-function tabProblem(action) {
-  const text = (value) => typeof value === "string" && value !== "";
+// Text a tab's id or name may hold: not empty, no NUL or CR (the strict reader refuses both, and a
+// page's parser reads CR as LF), and no half of a surrogate pair, which has no UTF-8 bytes and makes
+// `encodeURIComponent` throw.
+function cleanText(value) {
+  if (typeof value !== "string" || value === "" || value.includes("\0") || value.includes("\r")) return false;
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && (value.charCodeAt(i + 1) & 0xfc00) === 0xdc00) i += 1;
+    else if (c >= 0xd800 && c <= 0xdfff) return false;
+  }
+  return true;
+}
+
+export function tabProblem(action) {
+  const text = cleanText;
   const id = action.t === "insertSheet" ? action.sheet?.id : action.sheet;
   if (action.v !== 1 || !text(id) || id === "~") return "a tab action names a tab by a non-empty id";
   if (action.t === "renameSheet" && !text(action.name)) return "a tab's name is a non-empty text";
   if (action.t === "moveSheet" && !isKey(action.pos)) return "a tab's place is an order key";
   if (action.t === "insertSheet") {
+    if (action.sheet === null || typeof action.sheet !== "object" || Array.isArray(action.sheet)) return "a new tab is a record";
     const { name, pos, html } = action.sheet;
     if (!text(name) || !isKey(pos) || typeof html !== "string") return "a new tab has a name, an order key and its table's bytes";
     try {
@@ -275,7 +336,9 @@ function tabProblem(action) {
 //                                           `{ ids }` (the meaning this action left), and f means `ids`
 //   [sheet, row, col, f, slots, keys]       a slot restore: the references a lossy rewrite cut or
 //                                           shrank come back, each while its slot still holds `keys`
-function rewriteAll(run, before, after, deleted, inserted, restore) {
+// A cell a set of this step wrote gets no restore entry (`own`): the inverse's set writes it back
+// whole, and an entry would put this step's formula back over it.
+function rewriteAll(run, before, after, deleted, inserted, restore, { late = new Set(), own = new Set() } = {}) {
   const { wb } = run;
   const tabs = wb.sheets();
   const tabById = (id) => tabs.find((t) => t.id === id) ?? null;
@@ -284,7 +347,55 @@ function rewriteAll(run, before, after, deleted, inserted, restore) {
     return [sid, rid, cid, f, bound ? idsOf(bound) : null, null];
   });
 
-  // Rule 6: a restore is judged against what its cell meant right before this step's own rewrite.
+  const judged = judgeRestore(run, before, restore);
+
+  for (const [tab, r, c, cell] of formulaCells(tabs)) {
+    const rid = tab.backing.rows()[r].id;
+    const cid = tab.backing.cols()[c].id;
+    if (inserted.has(recordKey(tab.id, rid)) || inserted.has(recordKey(tab.id, cid)) || inserted.has(tab.id) || late.has(cellKey(tab.id, rid, cid))) continue;
+    const bound = bind(cell.f, tab.id, before);
+    if (bound === null) continue;
+    const mine = own.has(cellKey(tab.id, rid, cid));
+    const push = (entry) => mine || back.push(entry);
+    const text = print(bound, tab.id, before, after);
+    const was = idsOf(bound);
+    // A reference a tab action bound by name, or a floating end that now binds a record, comes back
+    // whole on undo while the cell still means what this step left.
+    const named = bound.refs.some((ref) => ref.unbound);
+    const floating = was.some((ref) => Array.isArray(ref) && ref[0] !== "~" && ref.includes(0));
+    if (named || floating) {
+      const now = bind(text, tab.id, after);
+      const is = now === null ? null : idsOf(now);
+      const nameBinds = named && now !== null && now.refs.some((ref, i) => bound.refs[i].unbound && !ref.unbound);
+      const endBinds = floating && is !== null && was.some((ref, i) => Array.isArray(ref) && ref[0] !== "~" && ref.some((id, k) => id === 0 && Array.isArray(is[i]) && is[i][k] !== 0));
+      if (nameBinds || endBinds) push([tab.id, rid, cid, cell.f, was, { ids: is }]);
+    }
+    const loses = lossy(bound, after);
+    // Rule 7: a rewrite that loses a record keeps its restore entry even when the text is the same.
+    // A rename leaves a typed spelling of the old name as it is, but the rename back prints the name
+    // as the tab spells it, so that text comes back whole.
+    if (text === cell.f && !loses) {
+      if (run.renamed && print(bound, tab.id, before, before) !== cell.f) push([tab.id, rid, cid, cell.f, was, { ids: was }]);
+      continue;
+    }
+    if (!loses && print(bound, tab.id, before, before) !== cell.f) {
+      const now = bind(text, tab.id, after);
+      if (now !== null) push([tab.id, rid, cid, cell.f, was, { ids: idsOf(now) }]);
+    }
+    if (loses) {
+      const forward = slotsOf(text, tab.id, after);
+      push([tab.id, rid, cid, cell.f, originalSlots(cell.f, tab.id, before), forward ? forward.keys : null]);
+    }
+    if (text !== cell.f) put(run, tab, r, c, { ...cell, f: text });
+  }
+
+  // The inverse undoes what the restore put back before it undoes the rewrite.
+  return [...undoRestores(runRestore(run, after, restore, judged), after), ...back];
+}
+
+// Rule 6: a restore is judged against what its cell meant right before this step's own rewrite.
+function judgeRestore(run, before, restore) {
+  const tabById = (id) => run.wb.sheets().find((t) => t.id === id) ?? null;
   const meantBefore = new Map();
   const keysBefore = new Map();
   for (const entry of restore) {
@@ -305,39 +416,15 @@ function rewriteAll(run, before, after, deleted, inserted, restore) {
     meantBefore.set(entry, pre !== null && cornersUnordered(idsOf(pre)) === cornersUnordered(guard.ids));
   }
 
-  for (const [tab, r, c, cell] of formulaCells(tabs)) {
-    const rid = tab.backing.rows()[r].id;
-    const cid = tab.backing.cols()[c].id;
-    if (inserted.has(rid) || inserted.has(cid) || inserted.has(tab.id)) continue;
-    const bound = bind(cell.f, tab.id, before);
-    if (bound === null) continue;
-    const text = print(bound, tab.id, before, after);
-    const was = idsOf(bound);
-    // A reference a tab action bound by name, or a floating end that now binds a record, comes back
-    // whole on undo while the cell still means what this step left.
-    const named = bound.refs.some((ref) => ref.unbound);
-    const floating = was.some((ref) => Array.isArray(ref) && ref[0] !== "~" && ref.includes(0));
-    if (named || floating) {
-      const now = bind(text, tab.id, after);
-      const is = now === null ? null : idsOf(now);
-      const nameBinds = named && now !== null && now.refs.some((ref, i) => bound.refs[i].unbound && !ref.unbound);
-      const endBinds = floating && is !== null && was.some((ref, i) => Array.isArray(ref) && ref[0] !== "~" && ref.some((id, k) => id === 0 && Array.isArray(is[i]) && is[i][k] !== 0));
-      if (nameBinds || endBinds) back.push([tab.id, rid, cid, cell.f, was, { ids: is }]);
-    }
-    const loses = lossy(bound, after);
-    // Rule 7: a rewrite that loses a record keeps its restore entry even when the text is the same.
-    if (text === cell.f && !loses) continue;
-    if (!loses && print(bound, tab.id, before, before) !== cell.f) {
-      const now = bind(text, tab.id, after);
-      if (now !== null) back.push([tab.id, rid, cid, cell.f, was, { ids: idsOf(now) }]);
-    }
-    if (loses) {
-      const forward = slotsOf(text, tab.id, after);
-      back.push([tab.id, rid, cid, cell.f, originalSlots(cell.f, tab.id, before), forward ? forward.keys : null]);
-    }
-    if (text !== cell.f) put(run, tab, r, c, { ...cell, f: text });
-  }
+  return { meantBefore, keysBefore };
+}
 
+// Puts back each restore entry whose guard still holds, in the frame after the step's own writes.
+// Returns what it changed, [sheet, row, col, old text, new text], so the caller's inverse can put
+// those cells back byte for byte even when coworkers moved rows in between.
+function runRestore(run, after, restore, { meantBefore, keysBefore }) {
+  const tabById = (id) => run.wb.sheets().find((t) => t.id === id) ?? null;
+  const changes = [];
   for (const entry of restore) {
     const [sid, rid, cid, f, refs, guard] = entry;
     const tab = tabById(sid);
@@ -365,7 +452,114 @@ function rewriteAll(run, before, after, deleted, inserted, restore) {
       text = whole && leftAsIs && JSON.stringify(whole.keys) === JSON.stringify(refs.keys) ? f : refs === null ? null : restoreSlots(cell.f, sid, after, refs, guard, pre);
       if (text === null) continue;
     }
-    if (text !== cell.f) put(run, tab, r, c, { ...cell, f: text });
+    if (text === cell.f) continue;
+    changes.push([sid, rid, cid, cell.f, text]);
+    put(run, tab, r, c, { ...cell, f: text });
   }
-  return back;
+  return changes;
+}
+
+// Whole-text restores that undo what `runRestore` changed: each old text comes back while its
+// cell still means what the restore left. `home` says where the inverse finds the cell and what
+// text it had (a sort moves cells and shifts their text; any other step leaves both).
+function undoRestores(changes, frame, home = (sid, rid, cid, old, text) => ({ row: rid, f: old, now: text })) {
+  const out = [];
+  for (const change of changes) {
+    const [sid, , cid] = change;
+    const { row, f, now } = home(...change);
+    const was = bind(f, sid, frame);
+    const left = bind(now, sid, frame);
+    if (was !== null && left !== null) out.push([sid, row, cid, f, idsOf(was), { ids: idsOf(left) }]);
+  }
+  return out;
+}
+
+// A sort: `rows` in their new order, `cols` null for the whole width (the row records move, to the
+// keys of the places they fill) or a list of columns (the cells of those columns move between the
+// same row records). A formula inside the block keeps its relative shape, as a copy keeps it; a
+// formula outside keeps its text, so it reads what now sits at its address, and after a whole-width
+// sort the engine scans the tab again (`changed.sorted`). The inverse is the sort back, plus a
+// whole-text restore for each formula whose shift there and back does not give its text again (a
+// row above row 1, a spelling). A frozen row is not sorted whole width. A merge the sort would cut,
+// or a column that is not there, is refused by the row move or the cell write the sort runs (the
+// room codec's `#flat` places say the same).
+const distinctIds = (list) => Array.isArray(list) && list.length > 0 && list.every((id) => typeof id === "string") && new Set(list).size === list.length;
+function applySort(run, action, restore) {
+  const { wb, derive, computed } = run;
+  if (!distinctIds(action.rows) || (action.cols !== null && !distinctIds(action.cols))) return refusal("bad_action", "a sort names distinct rows and columns");
+  const tab = wb.sheets().find((t) => t.id === action.sheet);
+  if (!tab) return refusal("missing_sheet", `no tab ${JSON.stringify(action.sheet)}`);
+  const b = tab.backing;
+  const before = frameOf(wb);
+  const judged = judgeRestore(run, before, restore);
+  const was = action.rows.map((id) => b.rowIndex(id));
+  if (was.some((at) => at < 0)) return refusal("missing_row", "a sorted row is not in the sheet");
+  if (action.cols === null && was.some((at) => b.rows()[at].frozen)) return refusal("bad_action", "a frozen row is not sorted");
+  const slots = was.slice().sort((x, y) => x - y);
+  const shifted = [];
+  let step;
+  let inverse;
+  if (action.cols === null) {
+    const pos = slots.map((at) => b.rows()[at].pos);
+    const old = action.rows.map((id, i) => ({ id, at: was[i], pos: b.rows()[was[i]].pos }));
+    for (const one of old) {
+      b.rows()[one.at].cells.forEach((cell, c) => {
+        if (cell && cell.f !== undefined) shifted.push({ row: one.id, back: one.id, col: b.cols()[c].id, f: cell.f, from: one.at });
+      });
+    }
+    step = { v: 1, t: "changeRows", sheet: tab.id, rows: action.rows.map((id, i) => ({ id, pos: pos[i] })) };
+    const home = old.slice().sort((x, y) => x.at - y.at);
+    inverse = { v: 1, t: "sort", sheet: tab.id, rows: home.map((one) => one.id), cols: null };
+  } else {
+    const cells = [];
+    action.rows.forEach((id, i) => {
+      const target = b.rows()[slots[i]].id;
+      for (const colId of action.cols) {
+        const c = b.colIndex(colId);
+        const cell = b.cell(was[i], c);
+        let content = inverseContent(cell);
+        if (content !== null && typeof content === "object") {
+          shifted.push({ row: target, back: id, col: colId, f: content.f, delta: slots[i] - was[i] });
+          content = { ...content, f: shiftRows(content.f, slots[i] - was[i]) };
+        }
+        const extra = cell ? cellExtra(cell, b.cols()[c]) : { fmt: null };
+        cells.push([target, colId, content, { ...extra, css: extra.css ?? "" }]);
+      }
+    });
+    step = { v: 1, t: "set", sheet: tab.id, cells };
+    const placed = slots.map((at) => b.rows()[at].id);
+    inverse = { v: 1, t: "sort", sheet: tab.id, rows: placed.map((id) => placed[action.rows.indexOf(id)]), cols: action.cols.slice() };
+  }
+  const out = apply(b, step, { derive, formulas: {}, computed });
+  if (out.out !== "applied") return out;
+  run.undo = () => apply(b, out.inverse, { derive, formulas: {}, computed });
+  for (const change of out.changes.cells) run.changed.cells.push({ ...change, sheet: tab.id });
+  for (const change of out.changes.rows ?? []) run.changed.rows.push({ ...change, sheet: tab.id });
+  run.changed.structure = action.cols === null;
+  if (action.cols === null) run.changed.sorted.push(tab.id);
+  const back = [];
+  for (const one of shifted) {
+    const delta = one.delta ?? b.rowIndex(one.row) - one.from;
+    one.d = delta;
+    const text = shiftRows(one.f, delta);
+    if (one.delta === undefined && text !== one.f) {
+      const r = b.rowIndex(one.row);
+      const c = b.colIndex(one.col);
+      put(run, tab, r, c, { ...b.cell(r, c), f: text });
+    }
+    const home = shiftRows(text, -delta);
+    if (home === one.f) continue;
+    const meant = bind(one.f, tab.id, before);
+    const left = bind(home, tab.id, before);
+    if (meant !== null && left !== null) back.push([tab.id, one.back, one.col, one.f, idsOf(meant), { ids: idsOf(left) }]);
+  }
+  // A sort is undone by the sort back, which moves each cell home and shifts its text by the same
+  // rows the other way; a cell the restore changed comes back to its old text in that frame.
+  const moved = new Map(shifted.map((one) => [`${one.row}\u0000${one.col}`, one]));
+  const home = (sid, rid, cid, old, text) => {
+    const one = sid === tab.id ? moved.get(`${rid}\u0000${cid}`) : undefined;
+    return one ? { row: one.back, f: one.f, now: shiftRows(text, -one.d) } : { row: rid, f: old, now: text };
+  };
+  const undo = undoRestores(runRestore(run, frameOf(wb), restore, judged), before, home);
+  return { out: "applied", inverse: { action: inverse, restore: [...undo, ...back] }, changed: run.changed };
 }

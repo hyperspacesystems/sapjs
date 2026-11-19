@@ -27,8 +27,8 @@ mutate({
   "rule-7": {
     what: "a lossy rewrite drops its restore entry when the text it writes is the same as the text it read",
     file: WORKBOOK,
-    find: "if (text === cell.f && !loses) continue;",
-    replace: "if (text === cell.f) continue;",
+    find: "if (text === cell.f && !loses) {",
+    replace: "if (text === cell.f) {",
     test: GATE,
     name: "the rewrite laws hold on every seed when each undo runs in order, and fail without the restore lists",
     expects: RED,

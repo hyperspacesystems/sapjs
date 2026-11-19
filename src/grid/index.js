@@ -1,5 +1,5 @@
-// The pure engine layer in one place: the check, the repair, the reducer, the codec and the
-// formatters. No clock, no locale, no page.
+// The pure engine layer in one place: the check, the repair, the reducer, the codec, the room
+// codec and the formatters. No clock, no locale, no page.
 
 export { GridRefused, validate, needs, creates, targets, fits, apply } from "./ops.js";
 export { modelBacking } from "./backing-model.js";
@@ -20,3 +20,4 @@ export { applyWorkbook, frameOf } from "./workbook.js";
 export { modelWorkbook } from "./workbook-backing.js";
 export { domWorkbook } from "./workbook-dom.js";
 export { createEngine } from "./formula/engine.js";
+export { sheetCodec, docOf, parseId } from "./room-codec.js";

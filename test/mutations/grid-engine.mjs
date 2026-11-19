@@ -40,8 +40,8 @@ mutate({
   "tab-action-rebind": {
     what: "a formula naming a tab is not bound again after a tab action, though the same text names other cells",
     file: ENGINE,
-    find: "        if (entry.floating || (renamed && entry.named) || lost(entry)) {",
-    replace: "        if (entry.floating || false || lost(entry)) {",
+    find: "        if (entry.floating || (renamed && entry.named) || (entry.named",
+    replace: "        if (entry.floating || false || (entry.named",
     test: ENGINE_TEST,
     name: "a formula naming a tab by a name it no longer has is #REF! after a rename outside the workbook apply",
     expects: RED,
