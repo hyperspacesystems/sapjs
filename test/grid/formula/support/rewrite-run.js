@@ -18,7 +18,7 @@
 //      overwrite a formula with a number exercise the bound inverse of a set.
 //   P5 the control: the same session with every restore list emptied fails P2 or P3.
 
-import { applyWorkbook, createEngine, modelWorkbook } from "../../../../src/grid/index.js";
+import { applyWorkbook, createEngine as makeEngine, modelWorkbook } from "../../../../src/grid/index.js";
 import { bind, frameOf, idsOf } from "../../../../src/grid/index.js";
 import { buildDeleteCols, buildDeleteRows, buildInsertCols, buildInsertRows, buildMoveRows, buildSet } from "../../../../src/grid/build.js";
 import { colName } from "../../../../src/grid/a1.js";
@@ -234,6 +234,15 @@ function namedLimit(was, now) {
 
 // E1, with `computing`: after every step a fresh engine computing the whole workbook writes no cell
 // and finds every result the running engine holds. Returns the first difference, or null.
+// Every engine a run makes hears functions and formatters arrive until it is disposed, so a run
+// disposes all of its own when it ends; thousands of seeds otherwise run out of memory.
+const live = [];
+function createEngine(wb) {
+  const engine = makeEngine(wb);
+  live.push(engine);
+  return engine;
+}
+
 function computesAgain(wb, engine) {
   const fresh = createEngine(wb);
   const written = fresh.load();
@@ -257,7 +266,15 @@ function computesAgain(wb, engine) {
   return null;
 }
 
-export function run(seed, { naive = false, strict = false, steps = STEPS, computing = false } = {}) {
+export function run(...args) {
+  try {
+    return runOnce(...args);
+  } finally {
+    live.splice(0).forEach((engine) => engine.dispose());
+  }
+}
+
+function runOnce(seed, { naive = false, strict = false, steps = STEPS, computing = false } = {}) {
   const rand = rng(seed);
   idn = 0;
   const wb = modelWorkbook([makeSheet("s1", "Budget", "A", 10, 5, rand), makeSheet("s2", "Notes tab", "B", 8, 4, rand)]);

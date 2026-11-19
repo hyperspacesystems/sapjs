@@ -10,64 +10,11 @@
 import { DATE_FUNCTIONS } from "./date-functions.js";
 import { LOOKUP_FUNCTIONS } from "./lookup.js";
 import { TEXT_FUNCTIONS } from "./text-functions.js";
+import { clean, eachNumber, fixed, numberArgs, numbers } from "./args.js";
 import { ERRORS, asRange, compare, error, isBlank, wildcard, isError, isRange, single, toBool, toNumber } from "./values.js";
 
 const isArea = (value) => value !== null && typeof value === "object" && value.isArea === true;
 
-// Each number the arguments give: in a range only its numbers count, and an error stops the walk;
-// a value written directly is coerced, so SUM(TRUE, "3") is 4. Returns the first error, or null.
-function eachNumber(args, add) {
-  for (const arg of args) {
-    if (isRange(arg)) {
-      let failure = null;
-      arg.forEach((value) => {
-        if (failure !== null) return;
-        if (isError(value)) failure = value;
-        else if (typeof value === "number") add(value);
-      });
-      if (failure !== null) return failure;
-      continue;
-    }
-    if (isError(arg)) return arg;
-    if (isBlank(arg)) continue;
-    // A text written into the call is read as a number; the empty text is #VALUE!, as in Sheets.
-    if (arg === "") return error("#VALUE!");
-    const number = toNumber(arg);
-    if (isError(number)) return number;
-    add(number);
-  }
-  return null;
-}
-
-const numbers = (args) => {
-  const list = [];
-  const failure = eachNumber(args, (value) => list.push(value));
-  return failure ?? list;
-};
-
-// A number to 15 significant digits, so 0.1 + 0.2 rounds as people expect.
-const clean = (value) => (Number.isFinite(value) ? Number(value.toPrecision(15)) : value);
-
-// Each argument as a number, or the first error: for functions with fixed numeric arguments.
-function numberArgs(args, count, defaults = []) {
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const arg = i < args.length ? single(args[i]) : defaults[i];
-    if (arg === undefined) return error("#N/A");
-    const number = toNumber(arg);
-    if (isError(number)) return number;
-    out.push(number);
-  }
-  return out;
-}
-
-const fixed = (count, body, defaults) => ({
-  run(args) {
-    if (args.length > count || args.length < count - defaults.filter((d) => d !== undefined).length) return error("#N/A");
-    const list = numberArgs(args, count, defaults);
-    return isError(list) ? list : body(...list);
-  },
-});
 
 function roundTo(x, digits, mode) {
   const d = Math.trunc(digits);
@@ -372,12 +319,49 @@ FUNCTIONS.set("SUBTOTAL", { run: (args, ctx) => {
   const code = toNumber(single(args[0]));
   if (isError(code)) return code;
   const name = SUBTOTALS[Math.trunc(code) % 100];
-  const fn = name ? FUNCTIONS.get(name) : undefined;
-  if (Math.trunc(code) > 111 || fn === undefined) return error("#VALUE!");
+  const fn = name ? lookupFunction(name) : null;
+  if (Math.trunc(code) > 111 || fn === null) return error("#VALUE!");
   return fn.run(args.slice(1).map(skip), ctx);
 } });
 
-export const lookupFunction = (name) => FUNCTIONS.get(name.toUpperCase()) ?? null;
+// The names SUBTOTAL's codes call, so a formula with SUBTOTAL counts them among its calls.
+export const SUBTOTAL_NAMES = SUBTOTALS.filter((name) => name !== null);
+
+// Functions added after load, such as the extended pack: a name the core has cannot be replaced.
+// Listeners hear the names that arrived or left, so an engine computes the formulas calling them.
+const added = new Map();
+const listeners = new Set();
+
+export const lookupFunction = (name) => {
+  const key = name.toUpperCase();
+  return FUNCTIONS.get(key) ?? added.get(key) ?? null;
+};
+
+// Adds `[name, { run, volatile? }]` entries and returns what removes them.
+export function addFunctions(entries) {
+  const names = [];
+  for (const [name, spec] of entries) {
+    const key = String(name).toUpperCase();
+    if (FUNCTIONS.has(key) || added.has(key) || typeof spec?.run !== "function") continue;
+    added.set(key, { run: spec.run, volatile: spec.volatile === true });
+    names.push(key);
+  }
+  const tell = () => {
+    if (names.length > 0) for (const listen of [...listeners]) listen(names);
+  };
+  tell();
+  return () => {
+    for (const key of names) added.delete(key);
+    tell();
+  };
+}
+
+export const isAddedFunction = (name) => added.has(name.toUpperCase());
+
+export const onFunctionsAdded = (listen) => {
+  listeners.add(listen);
+  return () => listeners.delete(listen);
+};
 
 export const functionNames = () => [...FUNCTIONS.keys()];
 

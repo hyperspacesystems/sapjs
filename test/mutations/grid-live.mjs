@@ -552,8 +552,8 @@ export const MUTATIONS = {
   ),
   "grid-foreign-registered": gridForeign(
     "a format an added formatter knows counts as unknown to a write from outside the grid",
-    'import { fmtKind } from "./format.js";',
-    'import { fmtKind as kindOf, isBuiltin } from "./format.js";\nconst fmtKind = (fmt) => (fmt === null || isBuiltin(fmt) ? kindOf(fmt) : "unknown");',
+    'import { fmtKind, onFormattersChanged } from "./format.js";',
+    'import { fmtKind as kindOf, isBuiltin, onFormattersChanged } from "./format.js";\nconst fmtKind = (fmt) => (fmt === null || isBuiltin(fmt) ? kindOf(fmt) : "unknown");',
     "a format an added formatter knows is put right after a write from outside the grid",
   ),
   "grid-foreign-unknown-flags": gridForeign(

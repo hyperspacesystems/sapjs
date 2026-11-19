@@ -44,7 +44,7 @@ import { cellValue, shown, typed } from "./codec/value.js";
 import { adoptFmt, contentOf, derive, effectiveFmt, waitsForFormatter } from "./content.js";
 import { DelimitedError, detectDelimiter, parseDelimited, protectField, writeDelimited } from "./csv.js";
 import { serial } from "./dates.js";
-import { fmtKind } from "./format.js";
+import { fmtKind, onFormattersChanged } from "./format.js";
 import { editText, parseInput } from "./input.js";
 import { localEdit, neutralInput } from "./locale-text.js";
 import { localeOf } from "./locales.js";
@@ -222,7 +222,7 @@ function settled(before, after, column, beforeColumn = column) {
 // workbook step `{ action, restore }`, which `apply` takes back. Another tab's Grid hears what the
 // step changed on its tab as a change with source "workbook", and every tab hears the results the
 // engine wrote there as a change with source "derived" that names them in `results`.
-export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday, engine = null, locale: localeTag = null } = {}) {
+export function createGrid(table, { write = (fn) => fn(), quiet = write, mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday, engine = null, locale: localeTag = null } = {}) {
   // The locale a person types and edits in ("de", "fr", ...); the table keeps the neutral form.
   const locale = localeOf(localeTag);
   if (table?.localName !== "table" || !table.hasAttribute("grid")) throw new TypeError("createGrid takes a <table grid> element");
@@ -291,7 +291,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // waiting: no formula cell, and no number under a format no formatter knows that shows its plain
   // value. One change event with source "derived" when a cell changed; it leaves the revision, so
   // opening a file never causes a save by itself. Returns that event, or null.
-  function refresh() {
+  function refresh(writeWith = write) {
     if (backing.sheet.stale !== true || issues.length > 0) return null;
     const cols = backing.cols();
     const changes = [];
@@ -313,8 +313,11 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
         if (!sameFields(cell, next, CELL_FIELDS)) changes.push({ r, c, row, column, cell, next });
       });
     });
-    if (changes.length > 0) write(() => changes.forEach(({ r, c, next }) => backing.putCell(r, c, next)));
-    if (!waiting) backing.setStale(false);
+    if (changes.length > 0) writeWith(() => changes.forEach(({ r, c, next }) => backing.putCell(r, c, next)));
+    if (!waiting) {
+      if (writeWith === write) backing.setStale(false);
+      else writeWith(() => backing.setStale(false));
+    }
     if (changes.length === 0) return null;
     const cells = changes.map(({ row, column, cell, next }) => ({ row: row.id, col: column.id, before: contentOf(cell), after: contentOf(next) }));
     return emit({ source: "derived", structure: false, cells, rows: noRecords(), cols: noRecords() });
@@ -790,11 +793,18 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     return event;
   }
 
+  // A formatter that arrives after load (the formats plugin) draws the cells that waited for it.
+  const unformatted = onFormattersChanged(() => {
+    // Only the drawing changed, so nobody's edit is written.
+    if (backing.sheet.stale === true) refresh(quiet);
+  });
+
   // Forgets the table: the next call for it makes a new Grid, and no listener hears this one again.
   function dispose() {
     if (grids.get(table) === grid) grids.delete(table);
     listeners.clear();
     unheard();
+    unformatted();
   }
 
   refresh();
@@ -868,11 +878,12 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
 // share the engine, and the engine computes every formula once, as writes that are not edits.
 // `quiet(fn)` (default `write`) writes the results at load that changed only through TODAY, NOW,
 // RAND or RANDBETWEEN, so they do not mark the document unsaved.
-// Returns `{ workbook, engine, grid(table) }`.
+// Returns `{ workbook, engine, grid(table), dispose() }`; `dispose` stops the engine hearing
+// functions and formatters arrive, for sheets nobody shows any more.
 export function createSheets(root, options = {}) {
   let engine = null;
   const workbook = domWorkbook(root, { mount: (table) => owned.get(createGrid(table, { ...options, engine })) });
   engine = createEngine(workbook, { write: options.write, quiet: options.quiet ?? options.write, now: options.now, random: options.random });
   engine.load();
-  return { workbook, engine, grid: (table) => createGrid(table, { ...options, engine }) };
+  return { workbook, engine, grid: (table) => createGrid(table, { ...options, engine }), dispose: () => engine.dispose() };
 }

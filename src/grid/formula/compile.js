@@ -38,15 +38,15 @@ function expression(node, places) {
       return (ctx) => applyBinary(op, left(ctx), right(ctx));
     }
     case "call": {
-      const fn = lookupFunction(node.name);
-      if (fn === null) {
-        const missing = error("#NAME?");
-        return () => missing;
-      }
+      // A core function is found now; any other is looked up each time the formula runs, so a
+      // formula compiled before the extended pack loaded finds its function once it is here.
+      const core = lookupFunction(node.name);
+      const name = node.name;
+      const missing = error("#NAME?");
       // A function that reads where its argument is (ROW, COLUMN, ROWS, COLUMNS) gets the area of a
-      // reference argument, not its value.
+      // reference argument, not its value. Only core functions do.
       const args = node.args.map((arg) => {
-        if (fn.areas === true && (arg.type === "ref" || arg.type === "range")) {
+        if (core?.areas === true && (arg.type === "ref" || arg.type === "range")) {
           const at = places.get(arg);
           return (ctx) => ctx.area(at);
         }
@@ -57,7 +57,10 @@ function expression(node, places) {
         }
         return expression(arg, places);
       });
-      return (ctx) => fn.run(args.map((arg) => arg(ctx)), ctx);
+      return (ctx) => {
+        const fn = core ?? lookupFunction(name);
+        return fn === null ? missing : fn.run(args.map((arg) => arg(ctx)), ctx);
+      };
     }
     default: {
       const broken = error("#ERROR!");

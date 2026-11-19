@@ -50,7 +50,9 @@ await bundle({ ...core, minify: true }, "dist/sap-core.min.js");
 // One classic script per first party plugin, named by the manifest: the file the engine
 // fetches from the sap-plugins/ folder beside it.
 const { MANIFEST } = await import("../src/plugin-manifest.js");
-const plugins = Object.values(MANIFEST).map((facts) => facts.file || facts.name);
+// First party plugins the manifest leaves out, which a host installs when a sheet needs them.
+const EXTRA_PLUGINS = ["grid-functions", "grid-formats"];
+const plugins = [...Object.values(MANIFEST).map((facts) => facts.file || facts.name), ...EXTRA_PLUGINS];
 for (const file of plugins) emit(`dist/sap-plugins/${file}.js`, await pluginBundle(`${root}src/plugins/${file}.js`, { minify: true }));
 const pluginNote = plugins.length ? ` and dist/sap-plugins/ (${plugins.join(", ")})` : "";
 

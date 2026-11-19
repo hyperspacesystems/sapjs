@@ -75,6 +75,7 @@ export function runCorpus(files = readdirSync(CORPUS).filter((name) => name.ends
         else out.mismatches.push({ file, sheet: sheet.name, ref: cell.ref, f: cell.f, want: cell.value, got });
       }
     });
+    engine.dispose();
   }
   return out;
 }

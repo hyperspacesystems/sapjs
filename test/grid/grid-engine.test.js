@@ -1,6 +1,7 @@
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { createGrid, createSheets } from "../../src/grid/grid.js";
 import { GridRefused } from "../../src/grid/ops.js";
+import gridFunctions from "../../src/plugins/grid-functions.js";
 import gridPlugin from "../../src/plugins/grid.js";
 import Sap from "../../src/sap.js";
 
@@ -206,4 +207,77 @@ test("a page undo of typing a formula over a number gives the number and the tot
   expect(textAt(root, "s1", 5, 1)).toBe("1160");
   budget.foreignWrite(history.undo());
   expect([textAt(root, "s1", 0, 1), textAt(root, "s1", 5, 1)]).toEqual(["10", "150"]);
+});
+
+// Bug this guards: the extended pack built as its own plugin added its functions to a copy of the
+// function table the grid's engine never reads, so =STDEV stayed #NAME? after it loaded.
+test("installing grid-functions computes a sheet's waiting formulas and tells the tab", () => {
+  Sap.use(gridPlugin);
+  const root = page();
+  Sap.grid.sheets(root);
+  const tables = [...root.querySelectorAll("section[item] > table[grid]")];
+  Sap.grid(tables[0]).set("A1", "=STDEV(B1:B2)");
+  expect(textAt(root, "s1", 0, 0)).toBe("#NAME?");
+  const heard = [];
+  Sap.grid(tables[0]).on("change", (event) => heard.push(event.source));
+  Sap.use(gridFunctions);
+  expect([textAt(root, "s1", 0, 0), heard]).toEqual(["7.07106781186548", ["derived"]]);
+});
+
+// Bug this guards: a rebuild of the page's sheets (another tab renamed a tab) left the old engine
+// listening, and when functions arrived it wrote its old =STDEV back over the number typed since.
+test("an engine replaced by a rebuild writes nothing when functions arrive", () => {
+  Sap.use(gridPlugin);
+  const root = page();
+  Sap.grid.sheets(root);
+  Sap.grid(tableIn(root, "s1")).set("B1", "=TWICE(2)");
+  Sap.grid.sheets(root);
+  Sap.grid(tableIn(root, "s1")).set("B1", "5");
+  const remove = Sap.grid.extend({ functions: [["TWICE", { run: ([x]) => 2 * x }]] });
+  try {
+    expect(textAt(root, "s1", 0, 1)).toBe("5");
+  } finally {
+    remove();
+  }
+});
+
+// Bug this guards: a number typed under a custom code before the formats plugin kept its plain
+// text when a formula on the same sheet used a custom code too, because the formula's redraw
+// cleared the stale mark the table's own redraw waits for.
+test("formatters arriving draw both the typed cells and the formulas of a stale table", () => {
+  Sap.use(gridPlugin);
+  const KG = '0.0 "kg"';
+  const root = document.createElement("main");
+  const sheet = { ...sheetOf("s1", 2, 1, { "0,0": { text: "30", n: true, fmt: KG }, "1,0": { text: "", f: "=A1*2", fmt: KG } }), stale: true };
+  root.innerHTML = `<section item data-id="s1" data-pos="A"><h2 bind="name">Sheet</h2>${tableHtml(sheet)}</section>`;
+  document.body.replaceChildren(root);
+  const calls = [];
+  // A host's write inside its quiet does not mark the file unsaved; only a write outside one does.
+  let hushed = 0;
+  const quiet = (fn) => { hushed += 1; try { fn(); } finally { hushed -= 1; } };
+  createSheets(root, { write: (fn) => { if (hushed === 0) calls.push("write"); fn(); }, quiet });
+  expect(tableIn(root, "s1").hasAttribute("stale")).toBe(true);
+  calls.length = 0;
+  const remove = Sap.grid.extend({ formatters: [{ test: (fmt) => fmt.endsWith('"kg"'), format: (value) => `${Number(value).toFixed(1)} kg`, kind: () => "number" }] });
+  try {
+    // Only the drawing changed, so nothing is written as an edit.
+    expect([textAt(root, "s1", 0, 0), textAt(root, "s1", 1, 0), tableIn(root, "s1").hasAttribute("stale"), calls.includes("write")]).toEqual(["30.0 kg", "60.0 kg", false, false]);
+  } finally {
+    remove();
+  }
+});
+
+// Bug this guards: grid-functions read the grid from window.Sap, which a page that loads the plugin
+// files before sap.js does not have yet, so setup threw and the plugin never installed.
+test("grid-functions reaches the grid through the kit, before window.Sap exists", () => {
+  const saved = globalThis.Sap;
+  delete globalThis.Sap;
+  try {
+    let added = null;
+    const kit = { plugin: (name) => (name === "grid" ? { grid: { extend: (parts) => ((added = parts), () => {}) } } : null) };
+    const made = gridFunctions.setup(kit);
+    expect([added.functions.some(([name]) => name === "STDEV"), typeof made.dispose]).toEqual([true, "function"]);
+  } finally {
+    globalThis.Sap = saved;
+  }
 });

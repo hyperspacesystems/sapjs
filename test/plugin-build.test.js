@@ -52,7 +52,7 @@ async function until(done, ms = 4000) {
 
 test("build: a plugin the manifest names is written to dist/sap-plugins/ as a script that registers itself", () => {
   expect(built.status).toBe(0);
-  expect(built.stdout).toContain("and dist/sap-plugins/ (tally)");
+  expect(built.stdout).toContain("and dist/sap-plugins/ (tally, grid-functions, grid-formats)");
   const text = readFileSync(join(copy, "dist", "sap-plugins", "tally.js"), "utf8");
   expect(text.startsWith("(function(){")).toBe(true);
   expect(text.trimEnd().endsWith("w.Sap&&w.Sap.use&&w.Sap.use(d)})(SapPlugin.default);})();")).toBe(true);

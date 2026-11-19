@@ -137,7 +137,8 @@ export function fmtKind(fmt) {
   const builtin = code(fmt);
   if (builtin) return builtin.kind;
   const custom = formatters.find((f) => f.test(fmt));
-  return custom ? custom.kind : "unknown";
+  if (!custom) return "unknown";
+  return typeof custom.kind === "function" ? custom.kind(fmt) : custom.kind;
 }
 
 // true for the number family, "@" and the date and time codes
@@ -164,12 +165,24 @@ export function adjustDecimals(fmt, delta, value) {
   return currencyMark + group + (places ? "." + "0".repeat(places) : "") + percentMark;
 }
 
+const formatterListeners = new Set();
+const formattersChanged = () => [...formatterListeners].forEach((listen) => listen());
+
 // Register a formatter for codes that are not built in: { test(fmt) -> boolean, format(value, fmt,
-// locale) -> string, kind }. Built-in codes always win. Returns a function that removes it.
+// locale) -> string or null, kind: a kind or kind(fmt) }. Built-in codes always win. Returns a
+// function that removes it. Listeners hear each arrival and removal, so open sheets draw again.
 export function addFormatter(formatter) {
   formatters.push(formatter);
+  formattersChanged();
   return () => {
     const at = formatters.indexOf(formatter);
-    if (at >= 0) formatters.splice(at, 1);
+    if (at < 0) return;
+    formatters.splice(at, 1);
+    formattersChanged();
   };
 }
+
+export const onFormattersChanged = (listen) => {
+  formatterListeners.add(listen);
+  return () => formatterListeners.delete(listen);
+};

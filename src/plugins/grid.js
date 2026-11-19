@@ -17,7 +17,8 @@
 
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../grid/csv.js";
 import { createSheetWriter } from "../grid/codec/cached-writer.js";
-import { formatValue } from "../grid/format.js";
+import { addFormatter, adjustDecimals, fmtKind, formatValue } from "../grid/format.js";
+import { addFunctions } from "../grid/formula/functions.js";
 import { tokenize } from "../grid/formula/text.js";
 import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
@@ -33,6 +34,9 @@ export default {
   setup(kit) {
     const tables = new Map();
     const listed = new Map();
+    // The sheets each table belongs to, so an engine stops listening once its last table is gone.
+    const sheetsOf = new Map();
+    const rootOf = new Map();
     const options = { write: kit.write, mayWrite: kit.mayWrite, schedule: (table) => kit.schedule(table, "plugin:grid") };
 
     // The Grid of a <table grid>: the same object for the same table, loaded on the first call and
@@ -46,6 +50,10 @@ export default {
       parseInput,
       editText,
       formatValue,
+      // A code's kind ("number", "date", "text", "unknown"), and the code with one more or one
+      // fewer decimal, for a host's number-format menu and decimals buttons.
+      fmtKind,
+      adjustDecimals,
       // The formula tokenizer, which a host's editor reads for reference outlines and picking.
       tokenize,
       csv: { detectDelimiter, parseDelimited, writeDelimited, protectField },
@@ -57,8 +65,29 @@ export default {
       // TODAY or RAND, `now` and `random`.
       sheets(root, extra = {}) {
         const made = createSheets(root, { ...options, ...extra });
-        for (const table of root.querySelectorAll(":scope > section[item] > table[grid]")) tables.set(table, made.grid(table));
+        const before = new Set();
+        for (const table of root.querySelectorAll(":scope > section[item] > table[grid]")) {
+          if (sheetsOf.has(table)) before.add(sheetsOf.get(table));
+          tables.set(table, made.grid(table));
+          sheetsOf.set(table, made);
+        }
+        rootOf.set(made, root);
+        // A rebuild of the same root (a tab renamed by another tab) replaces the old engine, which
+        // would otherwise write its old cells back when a plugin arrives.
+        const live = new Set(sheetsOf.values());
+        for (const old of before) {
+          if (live.has(old)) continue;
+          old.dispose();
+          rootOf.delete(old);
+        }
         return made;
+      },
+      // Functions and number formatters added from outside, such as the grid-functions and
+      // grid-formats plugins: `functions` as [name, { run, volatile? }] entries, `formatters` as
+      // format.js takes them. Open sheets compute and draw again. Returns what removes them all.
+      extend({ functions = [], formatters = [] } = {}) {
+        const removers = [addFunctions(functions), ...formatters.map(addFormatter)];
+        return () => removers.forEach((remove) => remove());
       },
     });
 
@@ -66,6 +95,13 @@ export default {
       tables.delete(table);
       unlist(table);
       known.dispose();
+      const made = sheetsOf.get(table);
+      sheetsOf.delete(table);
+      // The engine goes with its page's last tab: tabs added since sheets() ran are not in sheetsOf.
+      const root = rootOf.get(made);
+      if (made === undefined || [...sheetsOf.values()].includes(made) || (root?.isConnected && root.querySelector(":scope > section[item] > table[grid]") !== null)) return;
+      made.dispose();
+      rootOf.delete(made);
     }
 
     // Each kind of issue a sheet has, once, in the report of the app the sheet is in.

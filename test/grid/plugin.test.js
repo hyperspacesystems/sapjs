@@ -13,7 +13,7 @@ import { patchGrid } from "../../src/grid/codec/patch.js";
 import { gridModel } from "../../src/grid/codec/read.js";
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../../src/grid/csv.js";
-import { formatValue } from "../../src/grid/format.js";
+import { adjustDecimals, fmtKind, formatValue } from "../../src/grid/format.js";
 import { newId } from "../../src/grid/grid.js";
 import { editText, parseInput } from "../../src/grid/input.js";
 import { GridRefused } from "../../src/grid/ops.js";
@@ -152,6 +152,8 @@ test("Sap.grid exists after install, and Sap.use called twice still gives one gr
   // Bug this guards: ClayJS's formula editor reads Sap.grid.tokenize; without it, clicking a cell
   // while typing a formula inserts no reference.
   expect(Sap.grid.tokenize).toBe(tokenize);
+  // ClayJS's number-format menu and decimals buttons read these two.
+  expect([Sap.grid.fmtKind, Sap.grid.adjustDecimals]).toEqual([fmtKind, adjustDecimals]);
 
   // Asked for before the plugin's first pass, with a raw edit in the same turn: the pass that
   // follows the install reads it.
@@ -481,4 +483,25 @@ test("Sap.unmount leaves no listener", async () => {
   await settle();
   expect([heard, p.td("A2").textContent]).toEqual([[], "Lodging"]);
   expect(Sap.grid(p.table)).not.toBe(g);
+});
+
+// Bug this guards: the engine was let go with the last tab sheets() had seen, so after adding a
+// tab and deleting the first, functions that arrived never reached the tab still open.
+test("deleting the first tab after adding one keeps the page's engine", async () => {
+  install();
+  const sheet = (prefix, cells) => ({ cols: [{ id: `${prefix}c1`, pos: "A" }], rows: [{ id: `${prefix}r1`, pos: "A", cells }] });
+  const p = page(`<main sap><div id="book" items="tabs"><section item data-id="s1" data-pos="A"><h2>One</h2>${tableHtml(sheet("s1", [{ text: "1", n: true }]))}</section></div></main>`);
+  const book = p.root.querySelector("#book");
+  const made = Sap.grid.sheets(book);
+  await settle();
+  const first = made.grid(book.querySelector("table"));
+  first.apply({ v: 1, t: "insertSheet", sheet: { id: "s2", name: "Two", pos: "B", html: tableHtml(sheet("s2", [{ text: "", f: "=TWICE(2)" }])) } });
+  first.apply({ v: 1, t: "deleteSheet", sheet: "s1" });
+  await settle();
+  const remove = Sap.grid.extend({ functions: [["TWICE", { run: ([x]) => 2 * x }]] });
+  try {
+    expect(book.querySelector("table td").textContent).toBe("4");
+  } finally {
+    remove();
+  }
 });

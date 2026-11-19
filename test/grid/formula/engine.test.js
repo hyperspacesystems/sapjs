@@ -1,6 +1,8 @@
 import { apply, applyWorkbook } from "../../../src/grid/index.js";
 import { buildDeleteRows, buildInsertRows, buildSet } from "../../../src/grid/build.js";
 import { createEngine } from "../../../src/grid/formula/engine.js";
+import { addFunctions } from "../../../src/grid/formula/functions.js";
+import { addFormatter } from "../../../src/grid/format.js";
 import { modelWorkbook } from "../../../src/grid/workbook-backing.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
@@ -300,4 +302,185 @@ test("WEEKNUM of a blank date and EDATE of day 0 compute", () => {
   engine.load();
   expect(at(engine, "s1", "s1r1", "s1c2")).toBe(52);
   expect(at(engine, "s1", "s1r1", "s1c3")).toBe(0);
+});
+
+// David's answer 7 and the lazy pack: opening a saved sheet before its functions load must keep the
+// saved results and stay saved, and their arrival must not mark it unsaved either. Bugs: the load
+// wrote #NAME? over yesterday's results as an edit; the arrival wrote nothing, or wrote it as an
+// edit, or told no listener.
+test("a function added after load computes the formulas waiting on it quietly, and tells the tab", () => {
+  const cached = (f, text) => ({ text, n: true, v: text, f });
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 3, { "0,0": cached("=TWICE(4)", "8"), "0,1": cached("=A1+1", "9"), "0,2": formula("=TWICE(1)") })]);
+  const calls = [];
+  const engine = createEngine(wb, { write: (fn) => { calls.push("write"); fn(); }, quiet: (fn) => { calls.push("quiet"); fn(); } });
+  engine.load();
+  expect([at(engine, "s1", "s1r1", "s1c1"), at(engine, "s1", "s1r1", "s1c2"), at(engine, "s1", "s1r1", "s1c3")]).toEqual([8, 9, { error: "#NAME?" }]);
+  expect(tabOf(wb, "s1").backing.cell(0, 0).text).toBe("8");
+  calls.length = 0;
+  const heard = [];
+  engine.on("s1", (event) => heard.push(event.source));
+  const remove = addFunctions([["TWICE", { run: ([x]) => 3 * (typeof x === "object" ? x.get(0, 0) : x) }]]);
+  try {
+    expect([at(engine, "s1", "s1r1", "s1c1"), at(engine, "s1", "s1r1", "s1c2"), at(engine, "s1", "s1r1", "s1c3")]).toEqual([12, 13, 3]);
+    expect(calls).toEqual(["quiet"]);
+    expect(heard).toEqual(["derived"]);
+    expect(tabOf(wb, "s1").backing.cell(0, 1).text).toBe("13");
+  } finally {
+    remove();
+  }
+  expect(at(engine, "s1", "s1r1", "s1c1")).toEqual({ error: "#NAME?" });
+  engine.dispose();
+  const again = addFunctions([["TWICE", { run: () => 0 }]]);
+  try {
+    expect(at(engine, "s1", "s1r1", "s1c1")).toEqual({ error: "#NAME?" });
+  } finally {
+    again();
+  }
+});
+
+// Bug this guards: a sheet saved before the pack existed, opened on a page that already has it,
+// computed its =TWICE cells as ordinary writes and showed the file unsaved though nobody edited it.
+test("a sheet opened after a function arrived computes its formulas quietly", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 2, { "0,0": { text: "#NAME?", f: "=TWICE(4)" }, "0,1": number(1) })]);
+  const remove = addFunctions([["TWICE", { run: ([x]) => 2 * x }]]);
+  try {
+    const calls = [];
+    const engine = createEngine(wb, { write: (fn) => { calls.push("write"); fn(); }, quiet: (fn) => { calls.push("quiet"); fn(); } });
+    engine.load();
+    expect([tabOf(wb, "s1").backing.cell(0, 0).text, calls]).toEqual(["8", ["quiet"]]);
+    engine.dispose();
+  } finally {
+    remove();
+  }
+});
+
+// Bug: SUBTOTAL 7 (STDEV) stayed #VALUE! after the pack brought STDEV, because the formula calls
+// SUBTOTAL, not STDEV.
+test("SUBTOTAL's statistics codes compute once their functions arrive", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 3, 1, { "0,0": number(2), "1,0": number(4), "2,0": formula("=SUBTOTAL(10,A1:A2)") })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r3", "s1c1")).toEqual({ error: "#VALUE!" });
+  const remove = addFunctions([["VAR", { run: () => 2 }]]);
+  try {
+    expect(at(engine, "s1", "s1r3", "s1c1")).toBe(2);
+  } finally {
+    remove();
+  }
+});
+
+// Bug: a formula under a format no formatter knew kept its plain text after the formatter came.
+test("a formatter added after load redraws the formulas under its codes", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 1, { "0,0": { ...formula("=3+4"), fmt: "0.0 \"kg\"" } })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(tabOf(wb, "s1").backing.cell(0, 0).text).toBe("7");
+  const remove = addFormatter({ test: (fmt) => fmt.endsWith('"kg"'), format: (value) => `${Number(value).toFixed(1)} kg`, kind: () => "number" });
+  try {
+    expect(tabOf(wb, "s1").backing.cell(0, 0).text).toBe("7.0 kg");
+  } finally {
+    remove();
+  }
+});
+
+// Opening a saved sheet before the function pack arrives: what waits keeps what it was saved with.
+describe("before the pack arrives", () => {
+  const recording = () => {
+    const calls = [];
+    return { calls, options: { write: (fn) => { calls.push("write"); fn(); }, quiet: (fn) => { calls.push("quiet"); fn(); } } };
+  };
+
+  // Bug this guards: the saved #DIV/0! of a waiting =STDEV came back as text, so =A1/2 turned into
+  // #VALUE! and =IFERROR(A1,0) showed "#DIV/0!", written into the file.
+  test("a waiting formula's saved error is still an error to the formulas reading it", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 3, { "0,0": { text: "#DIV/0!", f: "=STDEV(B9)" }, "0,1": { text: "#DIV/0!", f: "=A1/2" }, "0,2": { text: "0", n: true, f: "=IFERROR(A1,0)" } })]);
+    const { calls, options } = recording();
+    const engine = createEngine(wb, options);
+    engine.load();
+    expect([at(engine, "s1", "s1r1", "s1c2"), at(engine, "s1", "s1r1", "s1c3"), calls]).toEqual([{ error: "#DIV/0!" }, 0, []]);
+  });
+
+  // Bug this guards: a saved =SUBTOTAL(7,...) showed #VALUE! on open, because only STDEV itself
+  // counted as waiting.
+  test("SUBTOTAL with a statistics code keeps its saved result", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 4, 1, { "0,0": number(2), "1,0": number(4), "2,0": number(6), "3,0": { text: "2", n: true, f: "=SUBTOTAL(7,A1:A3)" } })]);
+    const { calls, options } = recording();
+    const engine = createEngine(wb, options);
+    engine.load();
+    expect([at(engine, "s1", "s1r4", "s1c1"), calls]).toEqual([2, []]);
+  });
+
+  // Bug this guards: with the formats plugin first, =PMT under a custom code turned #NAME?.
+  test("formatters arriving first draw a waiting formula's saved result", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 1, { "0,0": { text: "8", n: true, f: "=TWICE(4)", fmt: '0.0 "kg"' } })]);
+    const engine = createEngine(wb);
+    engine.load();
+    const remove = addFormatter({ test: (fmt) => fmt.endsWith('"kg"'), format: (value) => `${Number(value).toFixed(1)} kg`, kind: () => "number" });
+    try {
+      expect([at(engine, "s1", "s1r1", "s1c1"), tabOf(wb, "s1").backing.cell(0, 0).text]).toEqual([8, "8.0 kg"]);
+    } finally {
+      remove();
+      engine.dispose();
+    }
+  });
+
+  // Bug this guards: every open rewrote "3.33 kg" as 3.33333333333333, because the saved value
+  // keeps 15 digits and the result has 17.
+  test("a formula under a code no formatter knows keeps its saved text when its value is the same", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 1, { "0,0": { text: "3.33 kg", n: true, v: "3.33333333333333", f: "=10/3", fmt: '0.00 "kg"' } })]);
+    const { calls, options } = recording();
+    const engine = createEngine(wb, options);
+    engine.load();
+    expect([tabOf(wb, "s1").backing.cell(0, 0).text, calls]).toEqual(["3.33 kg", []]);
+  });
+
+  // Bug this guards: TEXT with a code only the formats plugin knows wrote #VALUE! over its saved
+  // text on open, and stayed #VALUE! after the plugin came.
+  test("TEXT with a code no formatter knows keeps its saved text, and draws once formatters arrive", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 2, { "0,0": number(1.25), "0,1": { text: "1 1/4", f: '=TEXT(A1,"# ?/?")' } })]);
+    const { calls, options } = recording();
+    const engine = createEngine(wb, options);
+    engine.load();
+    expect([tabOf(wb, "s1").backing.cell(0, 1).text, calls]).toEqual(["1 1/4", []]);
+    const remove = addFormatter({ test: (fmt) => fmt === "# ?/?", format: () => "one and a quarter", kind: () => "number" });
+    try {
+      expect([tabOf(wb, "s1").backing.cell(0, 1).text, calls]).toEqual(["one and a quarter", ["quiet"]]);
+    } finally {
+      remove();
+      engine.dispose();
+    }
+  });
+
+  // Bug this guards: a sheet saved before its formatter existed, opened with the formatter here,
+  // drew its formulas in their codes through write and showed the file unsaved.
+  test("opening with the formatter already here draws formula results in their codes quietly", () => {
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 1, { "0,0": { text: "8", n: true, f: "=4*2", fmt: '0.0 "kg"' } })]);
+    const remove = addFormatter({ test: (fmt) => fmt.endsWith('"kg"'), format: (value) => `${Number(value).toFixed(1)} kg`, kind: () => "number" });
+    try {
+      const { calls, options } = recording();
+      const engine = createEngine(wb, options);
+      engine.load();
+      expect([tabOf(wb, "s1").backing.cell(0, 0).text, calls]).toEqual(["8.0 kg", ["quiet"]]);
+      engine.dispose();
+    } finally {
+      remove();
+    }
+  });
+
+  // Bug this guards: formatters arriving computed RAND under a custom code again, so its stored
+  // number changed though only the drawing had.
+  test("formatters arriving draw results again without computing them", () => {
+    let random = 0.25;
+    const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 1, { "0,0": { text: "", f: "=RAND()", fmt: '0.0 "kg"' } })]);
+    const engine = createEngine(wb, { random: () => random });
+    engine.load();
+    random = 0.75;
+    const remove = addFormatter({ test: (fmt) => fmt.endsWith('"kg"'), format: (value) => `${Number(value).toFixed(2)} kg`, kind: () => "number" });
+    try {
+      expect(tabOf(wb, "s1").backing.cell(0, 0).text).toBe("0.25 kg");
+    } finally {
+      remove();
+      engine.dispose();
+    }
+  });
 });

@@ -8,15 +8,15 @@
 // cell as the codec stores it (`{ f, text, v?, n?, t? }`, an error as its code's text) through
 // `write`, a write that is not an edit, and only when the stored parts change.
 
-import { lookupFunction } from "./functions.js";
+import { SUBTOTAL_NAMES, isAddedFunction, lookupFunction, onFunctionsAdded } from "./functions.js";
 import { systemNow, systemRandom } from "./clock.js";
-import { cellValue } from "../codec/value.js";
+import { cellValue, shown, typed } from "../codec/value.js";
 import { derive as defaultDerive, effectiveFmt, waitsForFormatter } from "../content.js";
-import { fmtKind } from "../format.js";
+import { fmtKind, isBuiltin, onFormattersChanged } from "../format.js";
 import { frameOf } from "../workbook.js";
 import { compiler } from "./compile.js";
 import { bind, cornersUnordered, idsOf } from "./text.js";
-import { error, isError, isRange, single } from "./values.js";
+import { ERRORS, error, isError, isRange, single } from "./values.js";
 
 const keyOf = (sheet, row, col) => `${sheet}\u0000${row}\u0000${col}`;
 const RESULT_FIELDS = ["f", "text", "v", "n", "t"];
@@ -88,6 +88,22 @@ function callsVolatile(parsed) {
     return [node.arg, node.left, node.right].some(walk);
   };
   return walk(parsed.ast);
+}
+
+// The upper-case names a parse calls.
+function callsOf(parsed) {
+  const names = new Set();
+  const walk = (node) => {
+    if (node === null || typeof node !== "object") return;
+    if (node.type === "call") {
+      names.add(node.name.toUpperCase());
+      node.args.forEach(walk);
+      return;
+    }
+    [node.arg, node.left, node.right].forEach(walk);
+  };
+  if (parsed !== null) walk(parsed.ast);
+  return [...names];
 }
 
 // `quiet(fn)` runs fn as a write that does not mark the document unsaved (David's answer 7): at
@@ -277,6 +293,9 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
     entry.place = PLACE.test(f);
     entry.stretch = stretchesOf(entry.parsed);
     entry.volatile = callsVolatile(entry.parsed);
+    entry.calls = callsOf(entry.parsed);
+    // The names whose arrival changes the result: a SUBTOTAL call also reads its codes' functions.
+    entry.hears = entry.calls.includes("SUBTOTAL") ? [...entry.calls, ...SUBTOTAL_NAMES] : entry.calls;
     entry.subtotal = entry.parsed !== null && /\bSUBTOTAL\s*\(/i.test(f);
     // A reference written with a tab name binds by that name, so a tab insert, delete or rename can
     // change what it names even when its text stays the same (an undo out of order leaves such text).
@@ -486,10 +505,12 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
       // Under a format no formatter knows yet, a cell that already holds this value keeps the text
       // it was saved with ("30.00 kg"); one that does not is written plain and waits for the
       // formatter, as the reducer's own writes do.
-      if (fmtKind(effectiveFmt(cell, column)) === "unknown" && !isError(value) && cellValue(cell) === value) continue;
+      if (fmtKind(effectiveFmt(cell, column)) === "unknown" && !isError(value) && cellValue(cell) === (typeof value === "number" ? typed(shown(value)) : value)) continue;
       const next = partsOf(cell, column, value);
       if (RESULT_FIELDS.every((key) => cell[key] === next[key])) continue;
-      (own !== null && own.has(entry.key) && tab.backing.loudly ? loud : hushed?.has(entry) ? soft : writes).push([tab.backing, r, c, next]);
+      // Opening a sheet saved before its formatter existed draws the same value in its code.
+      const redrawn = loading && cellValue(cell) === (typeof value === "number" ? typed(shown(value)) : value);
+      (own !== null && own.has(entry.key) && tab.backing.loudly ? loud : hushed?.has(entry) || redrawn ? soft : writes).push([tab.backing, r, c, next]);
       written.push({ sheet: entry.sheet, row: entry.row, col: entry.col });
     }
     for (const [backing, r, c, next] of loud) backing.loudly(() => backing.putCell(r, c, next));
@@ -498,11 +519,33 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
     return written;
   }
 
+  // While loading, a formula that calls a function nobody has added yet (the extended pack, still
+  // on its way) keeps the value it was saved with, so opening a saved sheet writes nothing. A cell
+  // saved with no result computes, and shows #NAME?.
+  let loading = false;
+  const pending = (entry) => entry.hears.some((name) => lookupFunction(name) === null);
+  function savedValue(entry) {
+    const tab = tabs.get(entry.sheet);
+    const cell = tab.backing.cell(tab.backing.rowIndex(entry.row), tab.backing.colIndex(entry.col));
+    if (cell === null) return null;
+    const value = cellValue(cell);
+    // A saved error is stored as its text; formulas reading it get the error back.
+    return typeof value === "string" && cell.t !== true && ERRORS.includes(value) ? error(value) : value;
+  }
+
+  // TEXT with a code no formatter knows yet is #VALUE!; at load it keeps its saved text until the
+  // formatters arrive.
+  function loaded(entry) {
+    if (pending(entry)) return savedValue(entry) ?? evaluate(entry);
+    const value = evaluate(entry);
+    return entry.calls.includes("TEXT") && isError(value) && value.error === "#VALUE!" ? savedValue(entry) ?? value : value;
+  }
+
   function recalc(seeds, kept = [], own = null) {
     const done = [];
     for (const { entries, cycle } of ordered(dirtyFrom(seeds))) {
       for (const entry of entries) {
-        results.set(entry.key, cycle ? error("#REF!", "circular") : evaluate(entry));
+        results.set(entry.key, cycle ? error("#REF!", "circular") : loading ? loaded(entry) : evaluate(entry));
         done.push(entry);
       }
     }
@@ -523,7 +566,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
 
   // A tab whose every formula has a result and that has no number waiting for a formatter is not
   // stale.
-  function settle() {
+  function settle(writeWith = write) {
     for (const tab of tabs.values()) {
       if (tab.backing.sheet.stale !== true) continue;
       const cols = tab.backing.cols();
@@ -534,7 +577,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
           if (!waiting && cell !== null && waitsForFormatter(cell, effectiveFmt(cell, column))) waiting = true;
         });
       });
-      if (!waiting) write(() => tab.backing.setStale(false));
+      if (!waiting) writeWith(() => tab.backing.setStale(false));
     }
   }
 
@@ -548,15 +591,62 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
     look();
     const seeds = [];
     for (const tab of tabs.values()) scanTab(tab, seeds);
-    hushed = dirtyFrom([...formulas.values()].filter((entry) => entry.volatile).map((entry) => entry.key));
+    // A result that changed only because of TODAY or RAND, or because a function added after the
+    // file was saved computes it now, is written quietly.
+    hushed = dirtyFrom([...formulas.values()].filter((entry) => entry.volatile || entry.hears.some(isAddedFunction)).map((entry) => entry.key));
+    loading = true;
     try {
       const written = recalc(seeds);
       settle();
       return written;
     } finally {
       hushed = null;
+      loading = false;
     }
   }
+
+  // Formulas whose results change because functions or formatters arrived or left: computed
+  // again and written quietly, since nobody edited, and announced like any computed step.
+  function again(entries) {
+    if (entries.length === 0) return;
+    const seeds = entries.map((entry) => entry.key);
+    hushed = dirtyFrom(seeds);
+    try {
+      const written = recalc(seeds);
+      settle(quiet);
+      announce({ sheets: [], cells: [], rows: [], cols: [], results: written });
+    } finally {
+      hushed = null;
+    }
+  }
+
+  // Formatters arriving change how results are drawn, not what they are: each result under a custom
+  // code is stored again as it is, so a formula still waiting for a function keeps its saved value.
+  // The stale mark stays for the grid's own refresh, which draws the typed cells under new codes.
+  function redraw(entries) {
+    const ready = entries.filter((entry) => results.has(entry.key));
+    if (ready.length === 0) return;
+    hushed = new Set(ready);
+    try {
+      announce({ sheets: [], cells: [], rows: [], cols: [], results: store(ready) });
+    } finally {
+      hushed = null;
+    }
+  }
+  const customFormat = (entry) => {
+    const tab = tabs.get(entry.sheet);
+    const r = tab.backing.rowIndex(entry.row);
+    const c = tab.backing.colIndex(entry.col);
+    const fmt = r < 0 || c < 0 ? null : effectiveFmt(tab.backing.cell(r, c), tab.backing.cols()[c]);
+    return typeof fmt === "string" && fmt !== "" && !isBuiltin(fmt);
+  };
+  const unlisten = [
+    onFunctionsAdded((names) => again([...formulas.values()].filter((entry) => entry.hears.some((name) => names.includes(name))))),
+    onFormattersChanged(() => {
+      again([...formulas.values()].filter((entry) => entry.calls.includes("TEXT")));
+      redraw([...formulas.values()].filter(customFormat));
+    }),
+  ];
 
   // After `applyWorkbook` applied a step: the formulas its cells hold are bound again, and every
   // formula that reads what changed is computed again. Returns the result cells written.
@@ -677,6 +767,10 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
   return {
     workbook: wb,
     load,
+    // Stops hearing functions and formatters arrive; an engine nobody uses any more calls it.
+    dispose() {
+      unlisten.forEach((off) => off());
+    },
     update,
     announce,
     on,
