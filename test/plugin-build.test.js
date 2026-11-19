@@ -119,13 +119,13 @@ test("propagate: ClayJS gets an ES module copy and a classic copy, and the check
   expect(missing.stderr).toContain("✗ missing: clayjs/src/vendor/sap-tally.vendor.js");
 });
 
-test("today: this project names no plugin, builds no plugin file, and propagates the same seven files", () => {
+test("today: this project names no plugin, builds no plugin file, and propagates the same eight files", () => {
   expect(existsSync(join(root, "dist", "sap-plugins"))).toBe(false);
   expect(require("../src/plugin-manifest.js").MANIFEST).toEqual({});
   const empty = join(copy, "workspace-today");
   for (const folder of ["clayjs/entries", "clayjs/src/vendor", "hyperclayjs/src/vendor", "hyper-html-api/src/codecs"]) mkdirSync(join(empty, folder), { recursive: true });
   const wrote = execFileSync(process.execPath, [join(root, "scripts", "propagate.js"), "--root", empty], { encoding: "utf8" });
-  expect(wrote.trim().split("\n")).toHaveLength(7);
+  expect(wrote.trim().split("\n")).toHaveLength(8);
   const checked = execFileSync(process.execPath, [join(root, "scripts", "propagate.js"), "--root", empty, "--check"], { encoding: "utf8" });
   expect(checked.trim().split("\n").map((line) => line.replace("✓ in sync ", ""))).toEqual([
     "clayjs/entries/sap.js",
@@ -135,6 +135,7 @@ test("today: this project names no plugin, builds no plugin file, and propagates
     "clayjs/src/vendor/sap-core.vendor.js",
     "clayjs/src/vendor/sap-ownership.vendor.js",
     "hyper-html-api/src/codecs/sheet.vendor.js",
+    "hyper-html-api/src/codecs/formula.vendor.js",
   ]);
   expect(existsSync(join(empty, "clayjs", "entries", "sap-plugins"))).toBe(false);
 });

@@ -108,6 +108,19 @@ function buildCodecVendor() {
   return CODEC_HEADER + '\n' + result.outputFiles[0].text
 }
 
+// The formula text layer (tokenizer, parser, references bound to ids, the standard spelling),
+// for hyper-html-api, which stores an agent's formula in the spelling a tab stores.
+const formulaEntry = path.join(rootDir, 'src', 'grid', 'formula', 'text.js')
+
+const FORMULA_HEADER = `// GENERATED — do not edit. Bundled from sapjs/src/grid/formula/text.js via sapjs
+// \`node scripts/propagate.js --only hyper-html-api\`. Edit the sapjs source and re-run.
+`
+
+function buildFormulaVendor() {
+  const result = buildSync({ entryPoints: [formulaEntry], bundle: true, format: 'esm', write: false, legalComments: 'none' })
+  return FORMULA_HEADER + '\n' + result.outputFiles[0].text
+}
+
 function readDist() {
   return fs.readFileSync(distFile, 'utf8').trim()
 }
@@ -169,6 +182,7 @@ const DESTINATIONS = [
   { client: 'clayjs', path: 'clayjs/src/vendor/sap-core.vendor.js', build: buildSapCoreEsm },
   { client: 'clayjs', path: 'clayjs/src/vendor/sap-ownership.vendor.js', build: buildOwnershipVendor },
   { client: 'hyper-html-api', path: 'hyper-html-api/src/codecs/sheet.vendor.js', build: buildCodecVendor, needsDist: false },
+  { client: 'hyper-html-api', path: 'hyper-html-api/src/codecs/formula.vendor.js', build: buildFormulaVendor, needsDist: false },
   ...PLUGIN_DESTINATIONS
 ]
 
