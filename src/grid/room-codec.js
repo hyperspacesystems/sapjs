@@ -23,6 +23,7 @@ import { createSheetWriter } from "./codec/cached-writer.js";
 import { fnv1a, hex } from "./codec/digest.js";
 import { effectiveFmt, waitsForFormatter, contentOf } from "./content.js";
 import { fromIds, meaning, print } from "./formula/text.js";
+import { isKey } from "./codec/order-keys.js";
 
 export const ROOM_CODEC_NAME = "sheet";
 export const ROOM_CODEC_VERSION = 1;
@@ -348,11 +349,12 @@ function withoutRefs(action) {
 }
 
 function validSort(action) {
-  for (const key of Object.keys(action)) if (!["v", "t", "sheet", "rows", "cols"].includes(key)) return false;
+  for (const key of Object.keys(action)) if (!["v", "t", "sheet", "rows", "cols", "pos"].includes(key)) return false;
   if (!text(action.sheet) || action.sheet === "") return false;
   const ids = (list) => Array.isArray(list) && list.length > 0 && list.every((id) => text(id) && ID.test(id)) && new Set(list).size === list.length;
   if (!ids(action.rows)) return false;
   if (action.cols !== null && !ids(action.cols)) return false;
+  if (action.pos !== undefined && (action.cols !== null || !Array.isArray(action.pos) || action.pos.length !== action.rows.length || !action.pos.every(isKey))) return false;
   return true;
 }
 

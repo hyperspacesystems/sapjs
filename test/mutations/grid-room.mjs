@@ -1,4 +1,4 @@
-// node test/mutations/grid-room.mjs [late-print|inserted-by-tab|rename-spelling|sort-shift|sort-restore|undo-restores|revert-guard|revert-free-name|free-name-skipped|revert-records|revert-gone-cells|wrote-inverse|sort-row-formulas|sort-row-style|creates-id|meaning-unbound|unseen-batch|value-kinds|current-freeze|validate-restore|tab-surrogate|ops-bytes|split-wire|writer-kept|stale-derive|stale-extras|section-comment|merge-done|unmerge-done|own-set|late-was|sort-shift-whole|sort-missing-col|sort-frozen|engine-sorted|index-stale|insert-free-name|holds-refused|unseen-null|merge-skip|meaning-locks|narrow-sort-places]
+// node test/mutations/grid-room.mjs [late-print|inserted-by-tab|rename-spelling|sort-shift|sort-restore|undo-restores|revert-guard|revert-free-name|free-name-skipped|revert-records|revert-gone-cells|wrote-inverse|sort-row-formulas|sort-row-style|creates-id|meaning-unbound|unseen-batch|value-kinds|current-freeze|validate-restore|tab-surrogate|ops-bytes|split-wire|writer-kept|stale-derive|stale-extras|section-comment|merge-done|unmerge-done|own-set|late-was|sort-shift-whole|sort-missing-col|sort-frozen|engine-sorted|index-stale|insert-free-name|holds-refused|unseen-null|merge-skip|meaning-locks|narrow-sort-places|sort-fresh-ties|sort-inverse-pos]
 //
 // Each entry removes one rule from the room codec, or from the workbook apply and the engine it
 // needs, and names the test that must then fail. With no argument every entry runs, one after
@@ -391,6 +391,24 @@ mutate({
     replace: "    if (![...ids].some((id) => skipped.has(id))) return action;",
     test: CODEC_TEST,
     name: "undoing a one-column sort after a coworker moved a row puts nothing on the wrong rows",
+    expects: RED,
+  },
+  "sort-fresh-ties": {
+    what: "a whole-width sort copies its slots' keys, so rows that share one key stay in id order",
+    file: WORKBOOK,
+    find: "    const pos = action.pos ?? freshTies(b.rows(), slots, slots.map((at) => b.rows()[at].pos));",
+    replace: "    const pos = action.pos ?? slots.map((at) => b.rows()[at].pos);",
+    test: WORKBOOK_TEST,
+    name: "a whole-width sort orders rows that share one order key, and its undo gives the rows back",
+    expects: RED,
+  },
+  "sort-inverse-pos": {
+    what: "a sort that minted keys is undone by re-sorting, which keeps the new keys",
+    file: WORKBOOK,
+    find: "cols: null, ...(minted ? { pos: home.map((one) => one.pos) } : {}) };",
+    replace: "cols: null };",
+    test: WORKBOOK_TEST,
+    name: "a whole-width sort orders rows that share one order key, and its undo gives the rows back",
     expects: RED,
   },
 });

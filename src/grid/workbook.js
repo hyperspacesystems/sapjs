@@ -13,7 +13,7 @@
 // a restore throws, every write is taken back and the step is refused.
 
 import { gridModel } from "./codec/read.js";
-import { isKey } from "./codec/order-keys.js";
+import { isKey, keysBetween } from "./codec/order-keys.js";
 import { contentOf, derive as defaultDerive } from "./content.js";
 import { apply, cellExtra, GridRefused, inverseContent } from "./ops.js";
 import { modelBacking } from "./backing-model.js";
@@ -484,11 +484,30 @@ function undoRestores(changes, frame, home = (sid, rid, cid, old, text) => ({ ro
 // or a column that is not there, is refused by the row move or the cell write the sort runs (the
 // room codec's `#flat` places say the same).
 const distinctIds = (list) => Array.isArray(list) && list.length > 0 && list.every((id) => typeof id === "string") && new Set(list).size === list.length;
+// Two rows can share one order key (two people adding a row at the end at the same moment). A sort
+// that copied its slots' keys would leave such rows in id order, so a run of slots sharing one key,
+// or a slot sharing its key with the row beside it, gets fresh keys between its neighbours, when the
+// run's rows sit together and the neighbours' keys leave room.
+function freshTies(rows, slots, pos) {
+  const out = pos.slice();
+  for (let start = 0; start < out.length; ) {
+    let end = start;
+    while (end + 1 < out.length && out[end + 1] === out[start]) end++;
+    const together = slots[end] - slots[start] === end - start;
+    const lo = start > 0 && slots[start - 1] === slots[start] - 1 ? out[start - 1] : rows[slots[start] - 1]?.pos ?? null;
+    const hi = rows[slots[end] + 1]?.pos ?? null;
+    const tied = end > start || lo === out[start] || hi === out[end];
+    if (tied && together && (lo === null || hi === null || lo < hi)) out.splice(start, end - start + 1, ...keysBetween(lo, hi, end - start + 1));
+    start = end + 1;
+  }
+  return out;
+}
 function applySort(run, action, restore) {
   const { wb, derive, computed } = run;
   if (!distinctIds(action.rows) || (action.cols !== null && !distinctIds(action.cols))) return refusal("bad_action", "a sort names distinct rows and columns");
   const tab = wb.sheets().find((t) => t.id === action.sheet);
   if (!tab) return refusal("missing_sheet", `no tab ${JSON.stringify(action.sheet)}`);
+  if (action.pos !== undefined && (action.cols !== null || !Array.isArray(action.pos) || action.pos.length !== action.rows.length || !action.pos.every(isKey))) return refusal("bad_action", "a sort's pos is one order key per row, for a whole-width sort");
   const b = tab.backing;
   const before = frameOf(wb);
   const judged = judgeRestore(run, before, restore);
@@ -500,7 +519,8 @@ function applySort(run, action, restore) {
   let step;
   let inverse;
   if (action.cols === null) {
-    const pos = slots.map((at) => b.rows()[at].pos);
+    const pos = action.pos ?? freshTies(b.rows(), slots, slots.map((at) => b.rows()[at].pos));
+    const minted = pos.some((key, i) => key !== b.rows()[slots[i]].pos);
     const old = action.rows.map((id, i) => ({ id, at: was[i], pos: b.rows()[was[i]].pos }));
     for (const one of old) {
       b.rows()[one.at].cells.forEach((cell, c) => {
@@ -509,7 +529,7 @@ function applySort(run, action, restore) {
     }
     step = { v: 1, t: "changeRows", sheet: tab.id, rows: action.rows.map((id, i) => ({ id, pos: pos[i] })) };
     const home = old.slice().sort((x, y) => x.at - y.at);
-    inverse = { v: 1, t: "sort", sheet: tab.id, rows: home.map((one) => one.id), cols: null };
+    inverse = { v: 1, t: "sort", sheet: tab.id, rows: home.map((one) => one.id), cols: null, ...(minted ? { pos: home.map((one) => one.pos) } : {}) };
   } else {
     const cells = [];
     action.rows.forEach((id, i) => {

@@ -467,3 +467,16 @@ test("a sort that would move a frozen row, cut a merge or name a missing column 
   expect([sort(["s1r2", "s1r1"], null), sort(["s1r3", "s1r2"], null), sort(["s1r5", "s1r2"], ["s1c2", "s1c9"]), sort(["s1r4", "s1r2"], ["s1c1"])]).toEqual(["bad_action", "merge_cut", "missing_col", "covered_cell"]);
   expect(bytes(wb)).toBe(before);
 });
+
+test("a whole-width sort orders rows that share one order key, and its undo gives the rows back", () => {
+  const html = '<table grid><colgroup><col data-id="a" data-pos="G"></colgroup>\n<tbody>\n<tr data-id="r1" data-pos="G"><td n>50</td></tr>\n<tr data-id="r2" data-pos="V"><td n>30</td></tr>\n<tr data-id="r3" data-pos="V"><td n>10</td></tr>\n</tbody></table>';
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "V", sheet: gridModel(html, 0) }]);
+  const values = () => wb.sheets()[0].backing.rows().map((row) => row.cells[0].text);
+  const before = tableHtml(wb.sheets()[0].backing.sheet);
+  const sorted = applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["r3", "r2", "r1"], cols: null });
+  expect(sorted.out).toBe("applied");
+  expect(values()).toEqual(["10", "30", "50"]);
+  expect(applyWorkbook(wb, sorted.inverse).out).toBe("applied");
+  expect(values()).toEqual(["50", "30", "10"]);
+  expect(tableHtml(wb.sheets()[0].backing.sheet)).toBe(before);
+});
