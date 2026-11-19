@@ -76,6 +76,14 @@ function mutateOne(label, m) {
 
 export function mutate(mutations, asked = process.argv.slice(2)) {
   const names = asked.length ? asked : Object.keys(mutations);
+  // MUTATION_FIND_ONLY=1 runs no test: it lists every entry whose text is not in its file
+  // exactly once, so a change that moved many lines finds every stale entry in seconds.
+  if (process.env.MUTATION_FIND_ONLY) {
+    const stale = names.filter((name) => readFileSync(join(process.cwd(), mutations[name].file), "utf8").split(mutations[name].find).length !== 2);
+    for (const name of stale) console.error(`stale: ${name} (${mutations[name].file})`);
+    console.log(`${names.length - stale.length} of ${names.length} entries find their text`);
+    process.exit(stale.length ? 2 : 0);
+  }
   let survived = 0;
   try {
     for (const name of names) {

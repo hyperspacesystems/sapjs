@@ -18,7 +18,9 @@ function checkDelimiter(delimiter) {
   }
 }
 
-export function detectDelimiter(text) {
+// In a locale with a decimal comma (`decimalComma`), a first line holding ";" is ";"-delimited:
+// its commas are decimal marks ("1,25;3,50").
+export function detectDelimiter(text, { decimalComma = false } = {}) {
   text = withoutBom(text);
   const counts = new Map(DELIMITERS.map((d) => [d, 0]));
   let quoted = false;
@@ -29,6 +31,15 @@ export function detectDelimiter(text) {
       else quoted = !quoted;
     } else if (!quoted && (ch === "\r" || ch === "\n")) break;
     else if (!quoted && counts.has(ch)) counts.set(ch, counts.get(ch) + 1);
+  }
+  if (decimalComma) {
+    // A comma between two digits is a decimal mark, not a delimiter.
+    const line = text.split(/\r?\n/, 1)[0];
+    const commas = (line.match(/,/g) ?? []).length - (line.match(/\d,\d/g) ?? []).length;
+    const tabs = counts.get("\t");
+    if (tabs > 0 && tabs >= counts.get(";")) return "\t";
+    if (counts.get(";") > 0) return ";";
+    return commas > 0 ? "," : ";";
   }
   return [...counts].sort((a, b) => b[1] - a[1])[0][0];
 }

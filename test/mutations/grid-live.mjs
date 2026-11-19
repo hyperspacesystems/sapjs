@@ -302,7 +302,7 @@ export const MUTATIONS = {
     "[...checkSheet(backing.sheet)]",
     HIDDEN,
   ),
-  "grid-same": grid("a second call for a table makes a second Grid", "  if (known !== undefined) return known;\n", "", "the same table gives the same Grid"),
+  "grid-same": grid("a second call for a table makes a second Grid", "  if (known !== undefined && (engine === null || engines.get(known) === engine)) return known;\n", "", "the same table gives the same Grid"),
   "grid-rescan-issues": grid(
     "rescan keeps the issues found at load",
     "    if (differed) retake(old);\n    check();\n",
@@ -328,8 +328,8 @@ export const MUTATIONS = {
   ),
   "grid-input-column": grid(
     "the editor text ignores the column's format",
-    "return editText(contentOf(own), effectiveFmt(own, column), today());",
-    "return editText(contentOf(own), effectiveFmt(own, undefined), today());",
+    "return editorText(own, effectiveFmt(own, column));",
+    "return editorText(own, effectiveFmt(own, undefined));",
     "input gives the editor text of each kind of cell",
   ),
   "grid-on-remove": grid("the function on returns removes nothing", "      listeners.delete(listener);\n", "", "on adds a listener and returns what removes it"),
@@ -356,8 +356,8 @@ export const MUTATIONS = {
   ),
   "grid-input-today": grid(
     "the editor text is found without today",
-    "effectiveFmt(own, column), today());",
-    "effectiveFmt(own, column), undefined);",
+    "const text = editText(content, fmt, today());",
+    "const text = editText(content, fmt, undefined);",
     "input gives the editor text of each kind of cell",
   ),
   "grid-tab-item": grid("a section with no item attribute is a tab", 'table.parentElement.matches("section[item]")', 'table.parentElement.matches("section")', "sheet and size describe the tab and the table"),
@@ -392,7 +392,7 @@ export const MUTATIONS = {
     "before: change.after, after: change.after",
     "one event and one revision step per write, and get reads the new value at once",
   ),
-  "grid-noop-text": gridWrite("a cell's own editor text is parsed as fresh input", "    if (item === editText(contentOf(own), effective, today())) return contentOf(own);\n", "", NOOP),
+  "grid-noop-text": gridWrite("a cell's own editor text is parsed as fresh input", "    if (item === editorText(own, effective) && (formulas || own?.f === undefined)) return contentOf(own);\n", "", NOOP),
   "grid-apply-quiet": gridWrite(
     "an applied write that changed nothing still tells the listeners",
     "      if (held.has(key) && same) continue;\n",
@@ -478,8 +478,8 @@ export const MUTATIONS = {
   ),
   "grid-schedule-table": gridStructure(
     "apply schedules the reducer's table changes and not the table",
-    "parts.length > 0 });\n    schedule(table);",
-    "parts.length > 0 });\n    schedule(parts);",
+    "parts.length > 0 || tabsChanged });\n    schedule(table);",
+    "parts.length > 0 || tabsChanged });\n    schedule(parts);",
     "the change event of an insert names the new rows and the action, with ids, and the table is scheduled",
   ),
   "grid-import-formula": gridCsv(
@@ -494,7 +494,7 @@ export const MUTATIONS = {
     "      return protect ? protectField(text) : text;",
     KINDS_EXPORT,
   ),
-  "grid-export-raw": gridCsv("a raw export writes the shown text", '      const text = values === "raw" ? shown(value) : one?.text ?? "";', '      const text = one?.text ?? "";', KINDS_EXPORT),
+  "grid-export-raw": gridCsv("a raw export writes the shown text", '      let text = values === "raw" ? shown(value) : one?.text ?? "";', '      let text = one?.text ?? "";', KINDS_EXPORT),
   "grid-import-types": gridCsv("an import parses a column typed text", '    const asText = (j) => types[j] === "text";', "    const asText = () => false;", "a column typed text keeps 02134"),
   "grid-import-text-clean": gridCsv(
     "a field of a column typed text keeps its CR LF line breaks",
@@ -504,8 +504,8 @@ export const MUTATIONS = {
   ),
   "grid-import-dispatch": gridCsv(
     "an import writes without dispatch",
-    "    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint }));",
-    "    return apply(trimmed(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint })));",
+    "    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, { data: true, formulas }), { formulas, newId: mint }));",
+    "    return apply(trimmed(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, { data: true, formulas }), { formulas, newId: mint })));",
     "an import is one action and one change event, and the sheet grows to hold it",
   ),
   "grid-import-ready": gridCsv(
@@ -522,13 +522,13 @@ export const MUTATIONS = {
   ),
   "grid-export-delimiter": gridCsv(
     "an export writes commas whatever the delimiter",
-    "return writeDelimited(eachRow(box, field), { delimiter });",
+    'return writeDelimited(eachRow(box, field), { delimiter: local ? ";" : delimiter });',
     "return writeDelimited(eachRow(box, field));",
     "export writes CR LF, quotes a field that holds the delimiter, a quote or a line break, and TSV is the same with a tab",
   ),
   "grid-import-delimiter": gridCsv(
     "an import detects the delimiter when it is given one",
-    "block = parseDelimited(text, { delimiter });",
+    'block = parseDelimited(text, { delimiter: delimiter ?? (locale.point === "," ? detectDelimiter(text, { decimalComma: true }) : undefined) });',
     "block = parseDelimited(text);",
     "export writes CR LF, quotes a field that holds the delimiter, a quote or a line break, and TSV is the same with a tab",
   ),
@@ -600,8 +600,8 @@ export const MUTATIONS = {
   "grid-ready-fresh": gridForeign("a command's apply skips every row it touches", "    fresh = event?.rescanned ? true : new Set(rows);\n", "    fresh = true;\n", COMMAND_FIRST),
   "grid-apply-paused": gridEdits(
     "every write apply makes is hidden from the page",
-    "    const out = applyAction(backing, action, { derive });\n",
-    "    const out = write(() => applyAction(backing, action, { derive }));\n",
+    "engine === null ? applyAction(backing, action, { derive }) :",
+    "engine === null ? write(() => applyAction(backing, action, { derive })) :",
     "an edit is a write the page sees, and a formula's new result through apply is a write it does not see that still fires an event",
   ),
   "grid-trim-grow": gridEdits(
@@ -656,8 +656,8 @@ export const MUTATIONS = {
   "grid-import-text-unprotect": {
     what: "an import into a text cell keeps the apostrophe our export with protect wrote",
     file: GRID,
-    find: 'const text = data && fmtKind(effective) === "text" ? unprotected(item) : item;',
-    replace: "const text = item;",
+    find: 'const text = data && fmtKind(effective) === "text" ? unprotected(item) : local;',
+    replace: "const text = local;",
     test: "test/grid/grid-csv-plain.test.js",
     name: "a protected export imported back over text and percent columns",
     expects: /toEqual|toBe/,
@@ -672,7 +672,7 @@ export const MUTATIONS = {
   "stale-unknown": stale("cells under a format no formatter knows are formatted again", 'if (fmtKind(look) === "unknown") {', "if (false) {", UNKNOWN_KEPT),
   "stale-early": stale(
     "the stale mark goes while a formula is waiting",
-    "        if (cell.f !== undefined) {\n          waiting = true;\n          return;\n        }\n",
+    "        if (cell.f !== undefined) {\n          if (engine === null) waiting = true;\n          return;\n        }\n",
     "        if (cell.f !== undefined) return;\n",
     HOST_FORMULA,
   ),
@@ -698,7 +698,7 @@ export const MUTATIONS = {
     "    if (backing.sheet.stale !== true) return null;",
     DAMAGED_STALE,
   ),
-  "stale-load": stale("loading leaves a stale table as the host wrote it", "\n  refresh();\n\n  const grid = {", "\n\n  const grid = {", HOST_PLAIN),
+  "stale-load": stale("loading leaves a stale table as the host wrote it", "\n  refresh();\n\n  // What a step another Grid", "\n\n  // What a step another Grid", HOST_PLAIN),
   "stale-whole-read": stale(
     "a whole read leaves a host patch unformatted",
     "structure: true, cells: [], rows: noRecords(), cols: noRecords() });\n    refresh();\n",

@@ -59,9 +59,11 @@ export default {
       newId,
       createSheetWriter: () => createSheetWriter(),
       // Every tab under `root` as one workbook with one formula engine (`createSheets`), each
-      // table's Grid known to the plugin as `Sap.grid(table)` gives it.
-      sheets(root) {
-        const made = createSheets(root, options);
+      // table's Grid known to the plugin as `Sap.grid(table)` gives it. `extra` holds the host's
+      // own options: `locale` ("de"), `quiet(fn)` for load results that changed only through
+      // TODAY or RAND, `now` and `random`.
+      sheets(root, extra = {}) {
+        const made = createSheets(root, { ...options, ...extra });
         for (const table of root.querySelectorAll(":scope > section[item] > table[grid]")) tables.set(table, made.grid(table));
         return made;
       },

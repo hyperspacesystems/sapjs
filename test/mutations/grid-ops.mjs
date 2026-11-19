@@ -222,7 +222,7 @@ export const MUTATIONS = {
   ),
   "ops-batch-atomic": ops(
     "a refused action in a batch leaves the ones before it applied",
-    "        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas });\n",
+    "        for (let i = done.length - 1; i >= 0; i--) applyOne(backing, done[i], { derive, formulas, computed });\n",
     "",
     "batch is all or nothing",
     /toBe|toEqual/,
@@ -345,7 +345,7 @@ export const MUTATIONS = {
   ),
   "ops-formula-stale": ops(
     "a new formula does not mark the table stale",
-    'if (action.t === "set" && action.cells.some((entry) => isFormula(entry[2]))) backing.setStale(true);',
+    'if (!computed && action.t === "set" && action.cells.some((entry) => isFormula(entry[2]))) backing.setStale(true);',
     "",
     "stale",
     /toBe|toEqual/,
@@ -362,8 +362,8 @@ export const MUTATIONS = {
   "ops-stale-batch-member": {
     what: "each action of a batch is judged on its own, so a batch that shows a number plain between two of its actions marks the table",
     file: OPS,
-    find: "      const out = each(backing, one, { derive, formulas });\n",
-    replace: "      const out = marked(backing, each(backing, one, { derive, formulas }));\n",
+    find: "      const out = each(backing, one, { derive, formulas, computed });\n",
+    replace: "      const out = marked(backing, each(backing, one, { derive, formulas, computed }));\n",
     test: "test/grid/ops-cells.test.js",
     name: "a batch judges its stale mark once, on the cells it leaves: a number it shows plain and then clears marks nothing",
     expects: /toBe|toEqual/,

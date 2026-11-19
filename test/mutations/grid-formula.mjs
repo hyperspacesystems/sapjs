@@ -1,6 +1,6 @@
 // node test/mutations/grid-formula.mjs [rule-6|rule-7|name-restore|float-restore|typed-restore|
 //   take-back|bind-set-inverse|enc-past-end|growing-set|slot-keys|by-pos-tie|reversed-span|text-not-formula|na-literal|stale-back|
-//   open-end|standard-names]
+//   open-end|standard-names|locale-typing|english-comma|csv-decimal-comma|locale-text-cell]
 // Each entry removes one rule from the formula text or the workbook apply and names the test that
 // must then fail. With no argument every entry runs, one after another.
 import { mutate } from "./harness.mjs";
@@ -166,6 +166,42 @@ mutate({
     replace: "src.slice(token.start, token.end)",
     test: TEXT_TEST,
     name: "the standard spelling capitalizes names and prints references from the tabs' names",
+    expects: RED,
+  },
+  "locale-typing": {
+    what: "text typed in a locale is stored as typed, not in the neutral form",
+    file: "src/grid/grid.js",
+    find: "    const local = asText ? item : neutralInput(item, locale);",
+    replace: "    const local = item;",
+    test: "test/grid/locale.test.js",
+    name: "a sheet typed in German saves the same bytes as the same sheet typed in English",
+    expects: RED,
+  },
+  "english-comma": {
+    what: "an English comma between arguments in a ;-locale is read as a separator",
+    file: "src/grid/locale-text.js",
+    find: '    else if (ch === "," && locale.separator !== ",") return null;\n',
+    replace: "",
+    test: "test/grid/locale.test.js",
+    name: "German formulas, numbers, dates and booleans read as their neutral form",
+    expects: RED,
+  },
+  "csv-decimal-comma": {
+    what: "a decimal-comma CSV is split on its commas",
+    file: "src/grid/csv.js",
+    find: "  if (decimalComma) {",
+    replace: "  if (false) {",
+    test: "test/grid/locale.test.js",
+    name: "a German CSV with decimal commas imports as two numbers",
+    expects: RED,
+  },
+  "locale-text-cell": {
+    what: "a text cell, or a values-only paste of formula text, is translated as typing is",
+    file: "src/grid/grid.js",
+    find: '    const asText = fmtKind(effective) === "text" || (!formulas && String(item)[0] === "=");',
+    replace: "    const asText = false;",
+    test: "test/grid/locale.test.js",
+    name: "German typing leaves alone what German does not read as a number, and text cells keep what was typed",
     expects: RED,
   },
 });

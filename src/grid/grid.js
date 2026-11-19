@@ -42,10 +42,12 @@ import { checkSheet } from "./check.js";
 import { QueryRefused } from "./codec/read.js";
 import { cellValue, shown, typed } from "./codec/value.js";
 import { adoptFmt, contentOf, derive, effectiveFmt, waitsForFormatter } from "./content.js";
-import { DelimitedError, parseDelimited, protectField, writeDelimited } from "./csv.js";
+import { DelimitedError, detectDelimiter, parseDelimited, protectField, writeDelimited } from "./csv.js";
 import { serial } from "./dates.js";
 import { fmtKind } from "./format.js";
 import { editText, parseInput } from "./input.js";
+import { localEdit, neutralInput } from "./locale-text.js";
+import { localeOf } from "./locales.js";
 import { normalizeSheet } from "./normalize.js";
 import { createEngine } from "./formula/engine.js";
 import { apply as applyAction, GridRefused } from "./ops.js";
@@ -220,7 +222,9 @@ function settled(before, after, column, beforeColumn = column) {
 // workbook step `{ action, restore }`, which `apply` takes back. Another tab's Grid hears what the
 // step changed on its tab as a change with source "workbook", and every tab hears the results the
 // engine wrote there as a change with source "derived" that names them in `results`.
-export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday, engine = null } = {}) {
+export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true, schedule = () => {}, newId: mint = newId, today = localToday, engine = null, locale: localeTag = null } = {}) {
+  // The locale a person types and edits in ("de", "fr", ...); the table keeps the neutral form.
+  const locale = localeOf(localeTag);
   if (table?.localName !== "table" || !table.hasAttribute("grid")) throw new TypeError("createGrid takes a <table grid> element");
   const known = grids.get(table);
   // A Grid made before its page's engine existed (a mount pass ran first) gives way to the
@@ -361,12 +365,17 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     if (values !== "shown" && values !== "raw") throw new GridRefused("bad_action", `values is "shown" or "raw", not ${values}`);
     const box = area === undefined ? { top: 0, left: 0, bottom: backing.rows().length - 1, right: backing.cols().length - 1 } : bounds(area);
     if (box.bottom < box.top || box.right < box.left) return "";
+    // In a decimal-comma locale the file is ";"-delimited and numbers and dates are written as the
+    // locale types them, so an export imports back unchanged under the same locale.
+    const local = locale.point === "," && delimiter === ",";
     const field = (one) => {
       const value = cellValue(one);
-      const text = values === "raw" ? shown(value) : one?.text ?? "";
+      let text = values === "raw" ? shown(value) : one?.text ?? "";
+      if (local && typeof value === "number") text = values === "raw" ? text.replace(".", locale.point) : localEdit(editText(value, one?.fmt ?? null, today()), value, locale);
+      else if (local && typeof value === "string") text = localEdit(text, value, locale);
       return protect && typeof value === "string" ? protectField(text) : text;
     };
-    return writeDelimited(eachRow(box, field), { delimiter });
+    return writeDelimited(eachRow(box, field), { delimiter: local ? ";" : delimiter });
   }
 
   function cell(ref) {
@@ -387,7 +396,15 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // The text the cell editor shows for the cell.
   function input(ref) {
     const { own, column } = locate(ref);
-    return editText(contentOf(own), effectiveFmt(own, column), today());
+    return editorText(own, effectiveFmt(own, column));
+  }
+
+  // The editor text of a cell under its format, in the grid's locale; text in a text "@" cell is
+  // shown as it is.
+  function editorText(own, fmt) {
+    const content = contentOf(own);
+    const text = editText(content, fmt, today());
+    return fmtKind(fmt) === "text" && typeof content === "string" ? text : localEdit(text, content, locale);
   }
 
   function on(type, listener) {
@@ -644,7 +661,7 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // item brings is made plain first, typed or not. With `data`, typed text is plain data: it is
   // parsed as if the cell had no format, unless the cell's format is text "@", where it loses the
   // apostrophe our export with `protect` writes before text.
-  function itemAt(item, r, c, { detect, formats, data }) {
+  function itemAt(item, r, c, { detect, formats, data, formulas }) {
     if (typeof item !== "string") return cleaned(item);
     if (!detect) return plain(item);
     const rows = backing.rows();
@@ -653,9 +670,16 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
     const held = r < rows.length && c < cols.length ? backing.cell(r, c) : null;
     const effective = effectiveFmt(held, column);
     const own = held?.hidden === true ? null : held;
-    if (item === editText(contentOf(own), effective, today())) return contentOf(own);
-    const text = data && fmtKind(effective) === "text" ? unprotected(item) : item;
-    const parsed = parseInput(text, { fmt: data && fmtKind(effective) !== "text" ? null : effective, today: today() });
+    if (item === editorText(own, effective) && (formulas || own?.f === undefined)) return contentOf(own);
+    // A local number, date or formula reads as its neutral form. Text in a text "@" cell, and text
+    // that only looks like a formula where formulas are kept as text, is never translated.
+    const asText = fmtKind(effective) === "text" || (!formulas && String(item)[0] === "=");
+    const local = asText ? item : neutralInput(item, locale);
+    if (local === null) throw new GridRefused("bad_formula", 'write the formula as this locale does: ";" between arguments and "," before decimals');
+    const text = data && fmtKind(effective) === "text" ? unprotected(item) : local;
+    let parsed = parseInput(text, { fmt: data && fmtKind(effective) !== "text" ? null : effective, today: today() });
+    // A rewrite the neutral form does not read as a number or date stores what was typed, as text.
+    if (local !== item && text === local && typeof parsed.content === "string") parsed = { content: String(item) };
     const fmt = formats ? adoptFmt(effective, column?.fmt ?? null, parsed.fmt) : undefined;
     return fmt === undefined ? parsed.content : { content: parsed.content, fmt };
   }
@@ -666,15 +690,15 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
   // (false keeps a formula as its text), `grow` (a block past the sheet adds rows and columns).
   function setRange(at, block, { detect = true, formats = true, formulas = true, grow = false } = {}) {
     ready(() => rowsFrom(at, block));
-    return send(buildSetRange(backing, at, itemsAt(at, block, () => detect, formats), { grow, formulas, newId: mint }));
+    return send(buildSetRange(backing, at, itemsAt(at, block, () => detect, formats, { formulas }), { grow, formulas, newId: mint }));
   }
 
   // A block's items as the cells they land on read them, from a cell on: `detect(j)` says whether
   // the j-th item of each line is typed text to parse, and `data` that typed text is plain data.
-  function itemsAt(at, block, detect, formats, data = false) {
+  function itemsAt(at, block, detect, formats, { data = false, formulas = true } = {}) {
     if (!Array.isArray(block)) return block;
     const { row, col } = parseRef(at);
-    return block.map((line, i) => (Array.isArray(line) ? line.map((item, j) => itemAt(item, row + i, col + j, { detect: detect(j), formats, data })) : line));
+    return block.map((line, i) => (Array.isArray(line) ? line.map((item, j) => itemAt(item, row + i, col + j, { detect: detect(j), formats, data, formulas })) : line));
   }
 
   // Delimited text written from a cell on as one action, the way a paste writes a block: the
@@ -692,11 +716,11 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
       if (!Array.isArray(types) || types.some((type) => type !== undefined && type !== "auto" && type !== "text")) {
         throw new GridRefused("bad_action", 'types lists "auto" or "text" for each column');
       }
-      block = parseDelimited(text, { delimiter });
+      block = parseDelimited(text, { delimiter: delimiter ?? (locale.point === "," ? detectDelimiter(text, { decimalComma: true }) : undefined) });
       return rowsFrom(at, block);
     });
     const fields = block.map((line) => line.map((field, j) => (asText(j) ? unprotected(field) : field)));
-    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, true), { formulas, newId: mint }));
+    return send(buildImport(backing, at, itemsAt(at, fields, (j) => !asText(j), true, { data: true, formulas }), { formulas, newId: mint }));
   }
 
   // Typed input for one cell; a number, true, false or null is taken as a plain value.

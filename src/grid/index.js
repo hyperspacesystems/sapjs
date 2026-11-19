@@ -8,6 +8,8 @@ export { normalizeSheet } from "./normalize.js";
 export { derive, contentOf, effectiveFmt, adoptFmt } from "./content.js";
 export { derivePlain } from "./derive-plain.js";
 export { parseInput, editText } from "./input.js";
+export { localeOf, localeTags } from "./locales.js";
+export { fromLocalFormula, localEdit, neutralInput, toLocalFormula } from "./locale-text.js";
 export { formatValue, fmtKind, isBuiltin, adjustDecimals, addFormatter } from "./format.js";
 export { serial, civil } from "./dates.js";
 export { cleanStyle, pasteStyle } from "./styles.js";
