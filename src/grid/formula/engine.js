@@ -8,6 +8,8 @@
 // cell as the codec stores it (`{ f, text, v?, n?, t? }`, an error as its code's text) through
 // `write`, a write that is not an edit, and only when the stored parts change.
 
+import { lookupFunction } from "./functions.js";
+import { systemNow, systemRandom } from "./clock.js";
 import { cellValue } from "../codec/value.js";
 import { derive as defaultDerive, effectiveFmt, waitsForFormatter } from "../content.js";
 import { fmtKind } from "../format.js";
@@ -51,7 +53,48 @@ function typedEnds(node) {
   return { r0: row(from), r1: row(to), c0: col(from), c1: col(to) };
 }
 
-export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() } = {}) {
+// SUMIF and AVERAGEIF total a sum range of another shape over the criteria range's shape, from
+// the sum range's first cell, as Sheets does; SUMIFS and AVERAGEIFS show #VALUE! for one, as
+// Sheets does. Which argument is which: [sum, criteria].
+const STRETCH = { SUMIF: [2, 0], AVERAGEIF: [2, 0] };
+
+// The stretched references of a parse: sum reference index -> criteria reference index.
+function stretchesOf(parsed) {
+  const out = new Map();
+  if (parsed === null) return out;
+  const at = new Map(parsed.refs.map((node, i) => [node, i]));
+  const walk = (node) => {
+    if (node === null || typeof node !== "object") return;
+    if (node.type === "call") {
+      const pair = STRETCH[node.name.toUpperCase()];
+      const sum = pair && node.args[pair[0]];
+      const criteria = pair && node.args[pair[1]];
+      if (sum && criteria && at.has(sum) && at.has(criteria)) out.set(at.get(sum), at.get(criteria));
+      node.args.forEach(walk);
+      return;
+    }
+    for (const part of [node.arg, node.left, node.right]) walk(part);
+  };
+  walk(parsed.ast);
+  return out;
+}
+
+// Whether a parse calls TODAY, NOW, RAND or RANDBETWEEN.
+function callsVolatile(parsed) {
+  if (parsed === null) return false;
+  const walk = (node) => {
+    if (node === null || typeof node !== "object") return false;
+    if (node.type === "call") return lookupFunction(node.name)?.volatile === true || node.args.some(walk);
+    return [node.arg, node.left, node.right].some(walk);
+  };
+  return walk(parsed.ast);
+}
+
+// `quiet(fn)` runs fn as a write that does not mark the document unsaved (David's answer 7): at
+// load, a result that changed only because it reads TODAY, NOW, RAND or RANDBETWEEN is written
+// that way, and saves with the next real edit. It defaults to `write`.
+export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(), quiet = write, now = systemNow, random = systemRandom } = {}) {
+  let hushed = null;
   const compileOf = compiler();
   const formulas = new Map();
   const results = new Map();
@@ -103,6 +146,11 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
       top,
       left,
       get: (i, j) => (i < height && j < width ? valueAt(sheet, top + i, left + j) : null),
+      // Whether the place holds a formula that calls SUBTOTAL, which SUBTOTAL leaves out.
+      subtotal: (i, j) => {
+        if (i >= innerHeight || j >= innerWidth) return false;
+        return formulas.get(keyOf(sheet, f.rows[top + i], f.cols[left + j]))?.subtotal === true;
+      },
       forEach(visit) {
         for (let i = 0; i < innerHeight; i++) for (let j = 0; j < innerWidth; j++) visit(valueAt(sheet, top + i, left + j), i, j);
       },
@@ -123,9 +171,36 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     return rows.length === 0 || cols.length === 0 ? [] : [rows[0], rows[1], cols[0], cols[1]];
   }
 
+  // The box reference i of an entry covers in a frame: a cell's place, a range's box, and for a
+  // stretched sum range the criteria range's shape from its first cell. [] covers nothing; null is
+  // a reference whose record is gone.
+  function refBox(entry, i, at = frame) {
+    const ref = entry.refs[i];
+    if (ref.dead || ref.unbound) return null;
+    let box;
+    if (ref.cell) {
+      const f = at.get(ref.s);
+      if (f === undefined || ref.r0 === undefined || ref.c0 === undefined) return null;
+      const r = f.rowAt.get(ref.r0);
+      const c = f.colAt.get(ref.c0);
+      if (r === undefined || c === undefined) return null;
+      box = [r, r, c, c];
+    } else box = boxOf(ref, entry.parsed.refs[i], at);
+    const k = entry.stretch.get(i);
+    if (k === undefined || box === null || box.length === 0) return box;
+    const criteria = refBox(entry, k, at);
+    if (criteria === null || criteria.length === 0) return box;
+    return [box[0], box[0] + criteria[1] - criteria[0], box[2], box[2] + criteria[3] - criteria[2]];
+  }
+
   function read(entry, i, whole) {
     const ref = entry.refs[i];
     if (ref.dead || ref.unbound) return error("#REF!");
+    if (entry.stretch.has(i)) {
+      const box = refBox(entry, i);
+      if (box === null) return error("#REF!");
+      return box.length === 0 ? rangeView(ref.s, [], []) : rangeView(ref.s, [box[0], box[1]], [box[2], box[3]]);
+    }
     const f = frame.get(ref.s);
     if (f === undefined) return error("#REF!");
     if (ref.cell) {
@@ -162,7 +237,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
   function link(entry) {
     entry.refs.forEach((ref, i) => {
       if (ref.dead || ref.unbound) return;
-      if (ref.cell) {
+      if (ref.cell && !entry.stretch.has(i)) {
         if (ref.r0 === undefined || ref.c0 === undefined) return;
         const key = keyOf(ref.s, ref.r0, ref.c0);
         if (!readers.has(key)) readers.set(key, new Set());
@@ -170,14 +245,14 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
         return;
       }
       if (!ranges.has(ref.s)) ranges.set(ref.s, new Set());
-      ranges.get(ref.s).add({ ref, entry, node: entry.parsed.refs[i] });
+      ranges.get(ref.s).add({ ref, entry, i });
     });
   }
 
   function unlink(entry) {
-    for (const ref of entry.refs) {
+    for (const [i, ref] of entry.refs.entries()) {
       if (ref.dead || ref.unbound) continue;
-      if (ref.cell) {
+      if (ref.cell && !entry.stretch.has(i)) {
         if (ref.r0 === undefined || ref.c0 === undefined) continue;
         const key = keyOf(ref.s, ref.r0, ref.c0);
         readers.get(key)?.delete(entry);
@@ -200,6 +275,9 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     // frame change (design 3.2 rule 8); ROW() and COLUMN() change when their cell moves.
     entry.floating = entry.refs.some((ref) => ref.unbound || (!ref.dead && [ref.r0, ref.c0, ref.r1, ref.c1].includes(undefined)));
     entry.place = PLACE.test(f);
+    entry.stretch = stretchesOf(entry.parsed);
+    entry.volatile = callsVolatile(entry.parsed);
+    entry.subtotal = entry.parsed !== null && /\bSUBTOTAL\s*\(/i.test(f);
     // A reference written with a tab name binds by that name, so a tab insert, delete or rename can
     // change what it names even when its text stays the same (an undo out of order leaves such text).
     entry.named = entry.parsed !== null && entry.parsed.refs.some((node) => node.sheet !== null);
@@ -241,7 +319,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     const boxes = new Map();
     const itemBox = (item) => {
       if (!boxes.has(item)) {
-        const box = boxOf(item.ref, item.node);
+        const box = refBox(item.entry, item.i);
         boxes.set(item, box === null || box.length === 0 ? null : box);
       }
       return boxes.get(item);
@@ -301,13 +379,13 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     list.forEach((entry, i) => {
       entry.refs.forEach((ref, k) => {
         if (ref.dead || ref.unbound) return;
-        if (ref.cell) {
+        if (ref.cell && !entry.stretch.has(k)) {
           if (ref.r0 === undefined || ref.c0 === undefined) return;
           const target = formulas.get(keyOf(ref.s, ref.r0, ref.c0));
           if (target !== undefined && at.has(target)) edge(i, at.get(target));
           return;
         }
-        const box = boxOf(ref, entry.parsed.refs[k]);
+        const box = refBox(entry, k);
         if (box === null || box.length === 0) return;
         for (const j of bySheet.get(ref.s) ?? []) {
           const [r, c] = where[j];
@@ -366,6 +444,8 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
       home: { row: f.rowAt.get(entry.row), col: f.colAt.get(entry.col) },
       read: (i, whole) => read(entry, i, whole),
       area: (i) => area(entry, i),
+      now,
+      random,
     };
     let value;
     try {
@@ -394,6 +474,7 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     const written = [];
     const writes = [];
     const loud = [];
+    const soft = [];
     for (const entry of entries) {
       const tab = tabs.get(entry.sheet);
       const r = tab.backing.rowIndex(entry.row);
@@ -408,11 +489,12 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
       if (fmtKind(effectiveFmt(cell, column)) === "unknown" && !isError(value) && cellValue(cell) === value) continue;
       const next = partsOf(cell, column, value);
       if (RESULT_FIELDS.every((key) => cell[key] === next[key])) continue;
-      (own !== null && own.has(entry.key) && tab.backing.loudly ? loud : writes).push([tab.backing, r, c, next]);
+      (own !== null && own.has(entry.key) && tab.backing.loudly ? loud : hushed?.has(entry) ? soft : writes).push([tab.backing, r, c, next]);
       written.push({ sheet: entry.sheet, row: entry.row, col: entry.col });
     }
     for (const [backing, r, c, next] of loud) backing.loudly(() => backing.putCell(r, c, next));
     if (writes.length > 0) write(() => writes.forEach(([backing, r, c, next]) => backing.putCell(r, c, next)));
+    if (soft.length > 0) quiet(() => soft.forEach(([backing, r, c, next]) => backing.putCell(r, c, next)));
     return written;
   }
 
@@ -466,9 +548,14 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
     look();
     const seeds = [];
     for (const tab of tabs.values()) scanTab(tab, seeds);
-    const written = recalc(seeds);
-    settle();
-    return written;
+    hushed = dirtyFrom([...formulas.values()].filter((entry) => entry.volatile).map((entry) => entry.key));
+    try {
+      const written = recalc(seeds);
+      settle();
+      return written;
+    } finally {
+      hushed = null;
+    }
   }
 
   // After `applyWorkbook` applied a step: the formulas its cells hold are bound again, and every
@@ -514,7 +601,9 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn() 
           const again = add(entry.sheet, entry.row, entry.col, entry.f);
           if (entry.floating || meaning(again) !== meaning(entry)) seeds.push(again.key);
         }
-        else if (entry.place && (moved.has(entry.sheet) || entry.refs.some((ref) => moved.has(ref.s)))) seeds.push(entry.key);
+        // A stretched sum range's cells depend on the criteria range's shape, so any move on its tab
+        // computes it again.
+        else if ((entry.place || entry.stretch.size > 0) && (moved.has(entry.sheet) || entry.refs.some((ref) => moved.has(ref.s)))) seeds.push(entry.key);
         else if (entry.refs.some((ref, i) => !ref.cell && !ref.dead && !ref.unbound && moved.has(ref.s) && regrouped(ref, entry.parsed.refs[i]))) seeds.push(entry.key);
       }
     }

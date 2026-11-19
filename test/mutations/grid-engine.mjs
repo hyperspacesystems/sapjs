@@ -2,7 +2,7 @@
 //   meaning-skip|self-edge|range-edges|range-coverage|place-seeding|announce|early-grid|
 //   tab-action-event|outside-write|same-text-result|place-other-tab|unknown-format|regrouped|
 //   past-edge-blanks|criteria-text-number|sum-range-shape|error-range|compare-digits|
-//   loud-own-result]
+//   loud-own-result|stretch-graph|volatile-quiet|nested-subtotal]
 // Each entry removes one rule from the formula engine, the workbook apply or the Grid and names the
 // test that must then fail. With no argument every entry runs, one after another. An entry no test
 // kills is reported, not dropped.
@@ -90,7 +90,7 @@ mutate({
   "place-seeding": {
     what: "a ROW() or COLUMN() formula on a tab whose rows or columns moved is not computed again",
     file: ENGINE,
-    find: "        else if (entry.place && (moved.has(entry.sheet) || entry.refs.some((ref) => moved.has(ref.s)))) seeds.push(entry.key);",
+    find: "        else if ((entry.place || entry.stretch.size > 0) && (moved.has(entry.sheet) || entry.refs.some((ref) => moved.has(ref.s)))) seeds.push(entry.key);",
     replace: "        else if (false) seeds.push(entry.key);",
     test: ENGINE_TEST,
     name: "=ROW() follows its row after a row insert above it",
@@ -190,12 +190,12 @@ mutate({
     expects: RED,
   },
   "sum-range-shape": {
-    what: "a SUMIF sum range of another shape is read past its edge, outside the graph",
+    what: "a SUMIFS sum range of another shape is totalled instead of showing #VALUE!",
     file: FUNCTIONS,
     find: '  if (totalled.height !== first.height || totalled.width !== first.width) return error("#VALUE!");\n',
     replace: "",
-    test: FUNCTIONS_TEST,
-    name: "a SUMIF whose sum range is not the criteria's shape shows #VALUE!",
+    test: ENGINE_TEST,
+    name: "a SUMIFS sum range of another shape shows #VALUE!, as in Sheets",
     expects: RED,
   },
   "error-range": {
@@ -219,10 +219,37 @@ mutate({
   "loud-own-result": {
     what: "the result of a formula the step typed is not part of the step's edit",
     file: ENGINE,
-    find: "(own !== null && own.has(entry.key) && tab.backing.loudly ? loud : writes)",
-    replace: "writes",
+    find: "(own !== null && own.has(entry.key) && tab.backing.loudly ? loud : hushed?.has(entry) ? soft : writes)",
+    replace: "(hushed?.has(entry) ? soft : writes)",
     test: GRID_TEST,
     name: "a page undo of typing a formula over a number gives the number and the totals back",
+    expects: RED,
+  },
+  "stretch-graph": {
+    what: "a stretched SUMIF sum range's cells are left out of the change index",
+    file: ENGINE,
+    find: "      if (ref.cell && !entry.stretch.has(i)) {\n        if (ref.r0 === undefined || ref.c0 === undefined) return;\n        const key = keyOf(ref.s, ref.r0, ref.c0);\n        if (!readers.has(key)) readers.set(key, new Set());",
+    replace: "      if (ref.cell) {\n        if (ref.r0 === undefined || ref.c0 === undefined) return;\n        const key = keyOf(ref.s, ref.r0, ref.c0);\n        if (!readers.has(key)) readers.set(key, new Set());",
+    test: ENGINE_TEST,
+    name: "a SUMIF sum range stretches to the criteria's shape and follows the stretched cells",
+    expects: RED,
+  },
+  "volatile-quiet": {
+    what: "results that changed only through TODAY at load are written as ordinary writes",
+    file: ENGINE,
+    find: "    hushed = dirtyFrom([...formulas.values()].filter((entry) => entry.volatile).map((entry) => entry.key));",
+    replace: "    hushed = new Set();",
+    test: ENGINE_TEST,
+    name: "at load, results that changed only through TODAY are written quietly, others as writes",
+    expects: RED,
+  },
+  "nested-subtotal": {
+    what: "SUBTOTAL counts cells that hold their own SUBTOTAL",
+    file: FUNCTIONS,
+    find: "  const skip = (range) => (isRange(range) && range.subtotal ? withoutSubtotals(range) : range);",
+    replace: "  const skip = (range) => range;",
+    test: ENGINE_TEST,
+    name: "SUBTOTAL leaves out cells that hold their own SUBTOTAL",
     expects: RED,
   },
 });

@@ -15,16 +15,17 @@ export const isBlank = (value) => value === null || value === undefined;
 
 export const isRange = (value) => value !== null && typeof value === "object" && value.isRange === true;
 
-// A number, or #VALUE! for a text that is not one. A blank is 0, true is 1.
+// A number, or #VALUE! for a text that is not one. A blank and the empty text are 0, true is 1; a
+// text of only spaces is not a number, as in Sheets.
 export function toNumber(value) {
   if (isError(value)) return value;
   if (isRange(value)) return value.height === 1 && value.width === 1 ? toNumber(value.get(0, 0)) : error("#VALUE!");
   if (isBlank(value)) return 0;
   if (typeof value === "number") return value;
   if (typeof value === "boolean") return value ? 1 : 0;
+  if (value === "") return 0;
   const text = value.trim();
-  if (text === "") return 0;
-  if (NUMBER.test(text)) return Number(text);
+  if (text !== "" && NUMBER.test(text)) return Number(text);
   return error("#VALUE!");
 }
 
@@ -90,6 +91,10 @@ export function compare(left, right) {
 // A number that left the finite range is #NUM!, as Sheets shows it.
 export const finite = (value) => (typeof value === "number" && !Number.isFinite(value) ? error("#NUM!") : value);
 
+// A sum or difference smaller than the rounding noise of its operands is 0, as Sheets shows
+// =0.1+0.2-0.3.
+const cancel = (out, a, b) => (out !== 0 && Math.abs(out) < Math.max(Math.abs(a), Math.abs(b)) * 1e-15 ? 0 : out);
+
 function arithmetic(op, left, right) {
   const a = toNumber(left);
   if (isError(a)) return a;
@@ -97,15 +102,15 @@ function arithmetic(op, left, right) {
   if (isError(b)) return b;
   switch (op) {
     case "+":
-      return finite(a + b);
+      return finite(cancel(a + b, a, b));
     case "-":
-      return finite(a - b);
+      return finite(cancel(a - b, a, b));
     case "*":
       return finite(a * b);
     case "/":
       return b === 0 ? error("#DIV/0!") : finite(a / b);
     case "^":
-      return a === 0 && b < 0 ? error("#DIV/0!") : finite(Math.pow(a, b));
+      return a === 0 && b < 0 ? error("#NUM!") : finite(Math.pow(a, b));
     default:
       return error("#VALUE!");
   }
@@ -159,3 +164,23 @@ export function percent(value) {
 // The same value: errors by code and reason, numbers by Object.is.
 export const sameValue = (left, right) =>
   Object.is(left, right) || (isError(left) && isError(right) && left.error === right.error && left.reason === right.reason);
+
+// A value as a range of one cell, so a function that walks ranges takes a plain value too.
+export const asRange = (value) =>
+  isRange(value) ? value : { isRange: true, height: 1, width: 1, innerHeight: 1, innerWidth: 1, outside: 0, get: () => value, forEach: (visit) => visit(value, 0, 0) };
+
+// Wildcards in a criterion or a SEARCH: * any run, ? one character, ~ takes the next one as it is.
+// The pattern's regular expression source, unanchored.
+export function wildcardSource(pattern) {
+  let source = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "~" && i + 1 < pattern.length) source += pattern[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    else if (ch === "*") source += "[\\s\\S]*";
+    else if (ch === "?") source += "[\\s\\S]";
+    else source += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return source;
+}
+
+export const wildcard = (pattern) => new RegExp(`^${wildcardSource(pattern)}$`, "iu");

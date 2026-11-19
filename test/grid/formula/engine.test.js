@@ -244,3 +244,60 @@ test("=SUM(A2:A) totals the column below its first row across a row insert", () 
   expect(applyWorkbook(wb, buildSet(backing, "A5", 100), { engine }).out).toBe("applied");
   expect(at(engine, "s1", "s1r1", "s1c2")).toBe(112);
 });
+
+// Sheets totals a SUMIF sum range of another shape over the criteria's shape from its first cell.
+// Bug: the stretched cells left out of the graph, so the total kept an old value.
+test("a SUMIF sum range stretches to the criteria's shape and follows the stretched cells", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 3, 3, { "0,0": number(1), "0,1": number(5), "0,2": formula('=SUMIF(A1:A3, ">0", B1)') })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r1", "s1c3")).toBe(5);
+  const backing = tabOf(wb, "s1").backing;
+  expect(applyWorkbook(wb, buildSet(backing, "A2", 1), { engine }).out).toBe("applied");
+  expect(applyWorkbook(wb, buildSet(backing, "B2", 7), { engine }).out).toBe("applied");
+  expect(at(engine, "s1", "s1r1", "s1c3")).toBe(12);
+  expect(applyWorkbook(wb, buildSet(backing, "B2", 8), { engine }).out).toBe("applied");
+  expect(at(engine, "s1", "s1r1", "s1c3")).toBe(13);
+});
+
+// David's answer 7: opening a document whose TODAY moved on must not mark it unsaved. Bug: the
+// load writes every changed result as a write that marks the document unsaved.
+test("at load, results that changed only through TODAY are written quietly, others as writes", () => {
+  const cached = (f, text) => ({ text, n: true, v: text, f });
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 3, { "0,0": cached("=TODAY()", "44000"), "0,1": cached("=A1+1", "44001"), "0,2": cached("=5+1", "1") })]);
+  const calls = [];
+  const engine = createEngine(wb, { write: (fn) => { calls.push("write"); fn(); }, quiet: (fn) => { calls.push("quiet"); fn(); }, now: () => 45000.5 });
+  engine.load();
+  expect(at(engine, "s1", "s1r1", "s1c1")).toBe(45000);
+  expect(at(engine, "s1", "s1r1", "s1c2")).toBe(45001);
+  expect(calls.sort()).toEqual(["quiet", "write"]);
+  expect(tabOf(wb, "s1").backing.cell(0, 1).text).toBe("45001");
+  expect(tabOf(wb, "s1").backing.cell(0, 2).text).toBe("6");
+});
+
+// Sheets shows #VALUE! for a SUMIFS sum range of another shape, so an off-by-one range is seen.
+test("a SUMIFS sum range of another shape shows #VALUE!, as in Sheets", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 3, 3, { "0,0": { text: "x" }, "2,0": { text: "x" }, "0,1": number(5), "1,1": number(7), "0,2": formula('=SUMIFS(B1:B2, A1:A3, "x")'), "1,2": formula('=SUMIF(A1:A3, "x", B1:B2)') })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r1", "s1c3")).toEqual({ error: "#VALUE!" });
+  expect(at(engine, "s1", "s1r2", "s1c3")).toBe(5);
+});
+
+// Bug: a grand total over subtotalled rows counted each subtotal again.
+test("SUBTOTAL leaves out cells that hold their own SUBTOTAL", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 6, 1, { "0,0": number(10), "1,0": number(20), "2,0": formula("=SUBTOTAL(9,A1:A2)"), "3,0": number(5), "4,0": formula("=subtotal(9,A4)"), "5,0": formula("=SUBTOTAL(9,A1:A5)") })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r3", "s1c1")).toBe(30);
+  expect(at(engine, "s1", "s1r6", "s1c1")).toBe(35);
+});
+
+// Bug: an ISO week number of a blank date cell threw and stopped the whole computation.
+test("WEEKNUM of a blank date and EDATE of day 0 compute", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 1, 3, { "0,1": formula("=WEEKNUM(A1,21)"), "0,2": formula("=EDATE(A1,0)") })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r1", "s1c2")).toBe(52);
+  expect(at(engine, "s1", "s1r1", "s1c3")).toBe(0);
+});

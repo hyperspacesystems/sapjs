@@ -842,11 +842,13 @@ export function createGrid(table, { write = (fn) => fn(), mayWrite = () => true,
 // Every tab of a page as one workbook with one formula engine: each `<section item>` child of
 // `root` holding a `<table grid>` gets its Grid (options as `createGrid` takes them), the Grids
 // share the engine, and the engine computes every formula once, as writes that are not edits.
+// `quiet(fn)` (default `write`) writes the results at load that changed only through TODAY, NOW,
+// RAND or RANDBETWEEN, so they do not mark the document unsaved.
 // Returns `{ workbook, engine, grid(table) }`.
 export function createSheets(root, options = {}) {
   let engine = null;
   const workbook = domWorkbook(root, { mount: (table) => owned.get(createGrid(table, { ...options, engine })) });
-  engine = createEngine(workbook, { write: options.write });
+  engine = createEngine(workbook, { write: options.write, quiet: options.quiet ?? options.write, now: options.now, random: options.random });
   engine.load();
   return { workbook, engine, grid: (table) => createGrid(table, { ...options, engine }) };
 }

@@ -7,13 +7,12 @@
 // S3 holds the first batches: math and totals, conditional totals, logic and information. S4 adds
 // lookup, text, dates, the volatile functions and the rest of the 86.
 
-import { compare, error, isBlank, isError, isRange, single, toBool, toNumber } from "./values.js";
+import { DATE_FUNCTIONS } from "./date-functions.js";
+import { LOOKUP_FUNCTIONS } from "./lookup.js";
+import { TEXT_FUNCTIONS } from "./text-functions.js";
+import { ERRORS, asRange, compare, error, isBlank, wildcard, isError, isRange, single, toBool, toNumber } from "./values.js";
 
 const isArea = (value) => value !== null && typeof value === "object" && value.isArea === true;
-
-// A value as a range of one cell, so a function that walks ranges takes a plain value too.
-const asRange = (value) =>
-  isRange(value) ? value : { isRange: true, height: 1, width: 1, innerHeight: 1, innerWidth: 1, outside: 0, get: () => value, forEach: (visit) => visit(value, 0, 0) };
 
 // Each number the arguments give: in a range only its numbers count, and an error stops the walk;
 // a value written directly is coerced, so SUM(TRUE, "3") is 4. Returns the first error, or null.
@@ -31,6 +30,8 @@ function eachNumber(args, add) {
     }
     if (isError(arg)) return arg;
     if (isBlank(arg)) continue;
+    // A text written into the call is read as a number; the empty text is #VALUE!, as in Sheets.
+    if (arg === "") return error("#VALUE!");
     const number = toNumber(arg);
     if (isError(number)) return number;
     add(number);
@@ -77,19 +78,6 @@ function roundTo(x, digits, mode) {
   return Object.is(out, -0) ? 0 : out;
 }
 
-// Wildcards in a criterion: * any run, ? one character, ~ takes the next one as it is.
-function wildcard(pattern) {
-  let source = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const ch = pattern[i];
-    if (ch === "~" && i + 1 < pattern.length) source += pattern[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    else if (ch === "*") source += "[\\s\\S]*";
-    else if (ch === "?") source += "[\\s\\S]";
-    else source += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(`^${source}$`, "i");
-}
-
 const NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 // A criterion of SUMIF and its kin, as a test of one cell's value. A number or a boolean matches
@@ -110,7 +98,9 @@ function criterion(raw) {
   const operand = NUMERIC.test(rest.trim()) ? Number(rest.trim()) : rest.toUpperCase() === "TRUE" ? true : rest.toUpperCase() === "FALSE" ? false : rest;
   if (op === "" || op === "=" || op === "<>") {
     let equal;
-    if (operand === "") equal = (value) => isBlank(value) || value === "";
+    // A criterion naming an error code matches the cells holding that error.
+    if (ERRORS.includes(rest.toUpperCase())) equal = (value) => isError(value) && value.error === rest.toUpperCase();
+    else if (operand === "") equal = (value) => isBlank(value) || value === "";
     else if (typeof operand === "number") {
       const text = rest.toLowerCase();
       equal = (value) => sameNumber(value, operand) || (typeof value === "string" && value.toLowerCase() === text);
@@ -167,9 +157,9 @@ function totalAt(range, cells) {
   return { total: clean(total), count };
 }
 
-// The range totalled must have the criteria's shape. Sheets stretches a shorter one from its first
-// cell; v1 shows #VALUE! instead, because cells read past a range are not in the graph and the total
-// would not follow them.
+// The range totalled must have the criteria's shape. For SUMIF and AVERAGEIF the engine hands a sum
+// range of another shape already stretched from its first cell, as Sheets does, with the stretched
+// cells in its graph; SUMIFS and AVERAGEIFS show #VALUE! for one, as Sheets does.
 const ifs = (target, pairs, average) => {
   const cells = matching(pairs);
   if (isError(cells)) return cells;
@@ -184,8 +174,9 @@ const ifs = (target, pairs, average) => {
 };
 
 // AND and OR: booleans and numbers count, in a range text and blanks are left out, and a call with
-// nothing to count is #VALUE!.
+// nothing to count is #VALUE!; a call with no arguments is #N/A.
 function logical(args, all) {
+  if (args.length === 0) return error("#N/A");
   let seen = 0;
   let result = all;
   const take = (value) => {
@@ -242,7 +233,7 @@ const FUNCTIONS = new Map([
     let count = 0;
     for (const arg of args) {
       if (isRange(arg)) arg.forEach((value) => { if (typeof value === "number") count += 1; });
-      else if (!isBlank(arg) && !isError(arg) && !isError(toNumber(arg))) count += 1;
+      else if (!isBlank(arg) && arg !== "" && !isError(arg) && !isError(toNumber(arg))) count += 1;
     }
     return count;
   } }],
@@ -348,7 +339,43 @@ const FUNCTIONS = new Map([
   ["COLUMN", place((area) => area.left)],
   ["ROWS", size((area) => area.height)],
   ["COLUMNS", size((area) => area.width)],
+  ["RAND", { volatile: true, run: (args, ctx) => (args.length > 0 ? error("#N/A") : ctx.random()) }],
+  ["RANDBETWEEN", { volatile: true, run: (args, ctx) => {
+    if (args.length !== 2) return error("#N/A");
+    const list = numberArgs(args, 2);
+    if (isError(list)) return list;
+    const low = Math.ceil(list[0]);
+    const high = Math.floor(list[1]);
+    return low > high ? error("#NUM!") : low + Math.floor(ctx.random() * (high - low + 1));
+  } }],
+  ...LOOKUP_FUNCTIONS,
+  ...TEXT_FUNCTIONS,
+  ...DATE_FUNCTIONS,
 ]);
+
+// SUBTOTAL's codes: 1 to 11, and 101 to 111 that in Sheets also skip hidden rows (a sheet here has
+// none to skip).
+const SUBTOTALS = [null, "AVERAGE", "COUNT", "COUNTA", "MAX", "MIN", "PRODUCT", "STDEV", "STDEVP", "SUM", "VAR", "VARP"];
+// A range as SUBTOTAL reads it: a cell holding its own SUBTOTAL is blank, so a grand total over
+// subtotalled rows counts each value once, as in Sheets.
+function withoutSubtotals(range) {
+  return {
+    ...range,
+    get: (i, j) => (range.subtotal(i, j) ? null : range.get(i, j)),
+    forEach: (visit) => range.forEach((value, i, j) => visit(range.subtotal(i, j) ? null : value, i, j)),
+  };
+}
+
+FUNCTIONS.set("SUBTOTAL", { run: (args, ctx) => {
+  const skip = (range) => (isRange(range) && range.subtotal ? withoutSubtotals(range) : range);
+  if (args.length < 2) return error("#N/A");
+  const code = toNumber(single(args[0]));
+  if (isError(code)) return code;
+  const name = SUBTOTALS[Math.trunc(code) % 100];
+  const fn = name ? FUNCTIONS.get(name) : undefined;
+  if (Math.trunc(code) > 111 || fn === undefined) return error("#VALUE!");
+  return fn.run(args.slice(1).map(skip), ctx);
+} });
 
 export const lookupFunction = (name) => FUNCTIONS.get(name.toUpperCase()) ?? null;
 

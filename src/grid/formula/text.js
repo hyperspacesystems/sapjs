@@ -387,7 +387,8 @@ function parseExpr(state, minPower) {
     if (power === undefined || power <= minPower) break;
 
     next(state);
-    const right = parseExpr(state, power);
+    // ^ groups from the right, as in Sheets: 2^3^2 is 2^9.
+    const right = parseExpr(state, token.value === "^" ? power - 1 : power);
     left = {
       type: "binary",
       op: token.value,

@@ -1,4 +1,5 @@
 import { createEngine } from "../../../src/grid/formula/engine.js";
+import { lookupFunction } from "../../../src/grid/formula/functions.js";
 import { modelWorkbook } from "../../../src/grid/workbook-backing.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
@@ -112,7 +113,7 @@ const CASES = [
   ["=ROW(A100)", 100],
   ['="a"&1.5&TRUE', "a1.5TRUE"],
   ["=2^-1", 0.5],
-  ["=0^-1", "#DIV/0!"],
+  ["=0^-1", "#NUM!"],
   ["=-A1%", -0.1],
   ['="10"+1', 11],
   ['="abc"="ABC"', true],
@@ -150,14 +151,20 @@ test("each function and operator gives what Google Sheets gives", () => {
   expect(got).toEqual(CASES);
 });
 
-// Sheets stretches a SUMIF sum range of another shape from its first cell; v1 shows #VALUE!,
-// because the stretched cells are not in the graph and the total would not follow them.
-test("a SUMIF whose sum range is not the criteria's shape shows #VALUE!", () => {
-  const sheet = {
-    cols: [0, 1, 2].map((c) => ({ id: `c${c}`, pos: `a${c}` })),
-    rows: [0, 1, 2].map((r) => ({ id: `r${r}`, pos: `a${r}`, cells: r === 0 ? [{ text: "1", n: true }, { text: "5", n: true }, { text: "", f: '=SUMIF(A1:A3, ">0", B1)' }] : [] })),
-  };
-  const engine = createEngine(modelWorkbook([{ id: "s", name: "Data", pos: "A", sheet }]));
-  engine.load();
-  expect(engine.result("s", "r0", "c2")).toEqual({ error: "#VALUE!" });
+// Bug: [h] read as a letter and the hour of the day, so a timesheet total of 37.5 hours showed
+// "[13]:30".
+test("TEXT shows elapsed hours and minutes for [h]:mm and [mm]:ss", () => {
+  const text = (value, fmt) => lookupFunction("TEXT").run([value, fmt], {});
+  expect(text(37.5 / 24, "[h]:mm")).toBe("37:30");
+  expect(text(1.5 / 24, "[mm]:ss")).toBe("90:00");
+});
+
+// Bug: LEFT cut an emoji in half and wrote the lone half into the cell.
+test("text functions count an emoji as one character", () => {
+  const run = (name, ...args) => lookupFunction(name).run(args, {});
+  expect(run("LEFT", "🟢 Done", 1)).toBe("🟢");
+  expect(run("LEN", "🟢 Done")).toBe(6);
+  expect(run("MID", "a🟢b", 3, 1)).toBe("b");
+  expect(run("FIND", "b", "a🟢b")).toBe(3);
+  expect(run("COUNTIF", "🟢", "?")).toBe(1);
 });
