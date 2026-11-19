@@ -229,3 +229,18 @@ test("a set of a formula to the text it already has keeps its result in the cell
   expect(applyWorkbook(wb, buildSet(backing, "A2", formula("=A1*2")), { engine }).out).toBe("applied");
   expect(backing.cell(1, 0).text).toBe("8");
 });
+
+// Bug: a range open at its bottom was printed as #REF! by a row insert, so its total turned into an
+// error; it must keep totalling every row from its first one down.
+test("=SUM(A2:A) totals the column below its first row across a row insert", () => {
+  const wb = book(["s1", "Sheet", "A", sheetOf("s1", 4, 2, { "0,1": formula("=SUM(A2:A)"), "1,0": number(5), "2,0": number(7), "3,0": number(9) })]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(at(engine, "s1", "s1r1", "s1c2")).toBe(21);
+  const backing = tabOf(wb, "s1").backing;
+  expect(applyWorkbook(wb, buildInsertRows(backing, "1", 1, { newId: mint() }), { engine }).out).toBe("applied");
+  expect(backing.cell(1, 1).f).toBe("=SUM(A3:A)");
+  expect(at(engine, "s1", "s1r1", "s1c2")).toBe(21);
+  expect(applyWorkbook(wb, buildSet(backing, "A5", 100), { engine }).out).toBe("applied");
+  expect(at(engine, "s1", "s1r1", "s1c2")).toBe(112);
+});

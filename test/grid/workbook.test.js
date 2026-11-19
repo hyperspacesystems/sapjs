@@ -95,6 +95,16 @@ test("a row above a total moves the total and every tab that names it", () => {
   expect(noStale(bytes(wb))).toBe(noStale(first));
 });
 
+// Bug: a row inserted at the top turned a stored `=SUM(B1:B)` into `=SUM(#REF!)`.
+test("a range open at its bottom follows a row insert and a delete and keeps its open end", () => {
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 4, 3, { "3,2": { text: "", f: "=SUM(B1:B)" } }) }]);
+  const backing = tabOf(wb, "s1").backing;
+  expect(applyWorkbook(wb, buildInsertRows(backing, "1", 1, { newId: mint() })).out).toBe("applied");
+  expect(formulaAt(wb, "s1", "s1r4", "s1c3")).toBe("=SUM(B2:B)");
+  expect(applyWorkbook(wb, buildDeleteRows(backing, "2:3")).out).toBe("applied");
+  expect(formulaAt(wb, "s1", "s1r4", "s1c3")).toBe("=SUM(B2:B)");
+});
+
 test("renaming a tab rewrites the formulas that name it and the inverse gives the bytes back", () => {
   const wb = modelWorkbook([
     { id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 3, 2, { "0,1": { text: "7", n: true, f: "=Notes!B9" } }) },

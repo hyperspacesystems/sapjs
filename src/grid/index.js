@@ -13,7 +13,7 @@ export { serial, civil } from "./dates.js";
 export { cleanStyle, pasteStyle } from "./styles.js";
 export { DelimitedError, detectDelimiter, parseDelimited, writeDelimited, protectField } from "./csv.js";
 export { colName, colIndex, parseRef, parseArea } from "./a1.js";
-export { bind, print, idsOf, fromIds, frameFrom } from "./formula/text.js";
+export { bind, print, standard, idsOf, fromIds, frameFrom } from "./formula/text.js";
 export { applyWorkbook, frameOf } from "./workbook.js";
 export { modelWorkbook } from "./workbook-backing.js";
 export { domWorkbook } from "./workbook-dom.js";

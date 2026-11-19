@@ -546,13 +546,15 @@ function floatText(node, ref, prefix, from, to, was, sheet) {
     }
     return afterLen;
   };
+  // An open end (null, as the B of `B2:B`) stays open; the other end follows its record or floats.
   const axis = (a, b, typedA, typedB, afterAt, beforeAt, beforeList, afterLen) => {
-    if (a === null) return [null, null];
-    if (a !== undefined && b !== undefined) {
+    if (a === null && b === null) return [null, null];
+    if (a !== undefined && b !== undefined && a !== null && b !== null) {
       if (node.type === "ref") return afterAt.has(a) ? [afterAt.get(a), afterAt.get(a)] : ["dead", "dead"];
       return axisSpan(a, b, beforeAt, beforeList, afterAt) ?? ["dead", "dead"];
     }
-    return [one(a, typedA, afterAt, beforeAt, beforeList, afterLen), one(b, typedB, afterAt, beforeAt, beforeList, afterLen)];
+    const end = (id, typed) => (id === null ? null : one(id, typed, afterAt, beforeAt, beforeList, afterLen));
+    return [end(a, typedA), end(b, typedB)];
   };
   const rowOf = (part) => (part.row === null ? null : part.row - 1);
   const colOf = (part) => (part.col === null ? null : colIndex(part.col));
@@ -571,7 +573,10 @@ function refText(node, ref, homeId, before, after) {
   if (sheet === undefined) return "#REF!";
   const was = before?.get(ref.s);
   const prefix = ref.s === homeId && node.sheet === null ? "" : `${quoteName(sheet.name)}!`;
-  const floats = ref.r0 === undefined || ref.c0 === undefined || ref.r1 === undefined || ref.c1 === undefined;
+  // A range open at one end of an axis (`B2:B`, rows from 2 to the tab's end) prints as floating
+  // ends do: the bound end follows its record, the open end stays open.
+  const half = (x, y) => (x === null) !== (y === null);
+  const floats = ref.r0 === undefined || ref.c0 === undefined || ref.r1 === undefined || ref.c1 === undefined || half(ref.r0, ref.r1) || half(ref.c0, ref.c1);
   const from = node.type === "ref" ? node : node.from;
   const to = node.type === "ref" ? node : node.to;
   if (floats) return floatText(node, ref, prefix, from, to, was, sheet);
@@ -602,6 +607,23 @@ export function print(bound, homeId, before, after) {
     out += src.slice(at, node.span[0]) + (text === null ? typed : text);
     at = node.span[1];
   });
+  return "=" + out + src.slice(at);
+}
+
+// A formula in the standard spelling (David's answer 10): function names and TRUE and FALSE in
+// capitals, every reference printed from the tab's own names (`=budget!a1` is `=Budget!A1`). The
+// spacing and everything else stay as typed. A formula that does not parse comes back unchanged.
+export function standard(f, homeId, frame) {
+  const bound = bind(f, homeId, frame);
+  if (bound === null) return f;
+  const src = print(bound, homeId, frame, frame).slice(1);
+  let out = "";
+  let at = 0;
+  for (const token of tokenize(src)) {
+    if (token.type !== "name" && token.type !== "bool") continue;
+    out += src.slice(at, token.start) + (token.type === "name" ? token.value : token.value ? "TRUE" : "FALSE");
+    at = token.end;
+  }
   return "=" + out + src.slice(at);
 }
 

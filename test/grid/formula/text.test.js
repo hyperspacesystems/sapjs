@@ -1,4 +1,4 @@
-import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, parse, print, restoreSlots, slotsOf, tokenize } from "../../../src/grid/formula/text.js";
+import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, parse, print, restoreSlots, slotsOf, standard, tokenize } from "../../../src/grid/formula/text.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
 
@@ -108,4 +108,23 @@ test("ZZZ sorts past every column the sheet has", () => {
   const after = frame(tab("s1", "Budget", rowsOf("s1", 100, ["s1r0"]), colsOf("s1", 3)));
   expect(idsOf(bind("=ZZZ1", "s1", oneTab))).toEqual([["s1", "s1r1", 0, "s1r1", 0]]);
   expect(printed("=ZZZ1", "s1", oneTab, after)).toBe("=ZZZ2");
+});
+
+// Bug: a range open at one end (`B2:B`, the common Sheets way to total a column below a header)
+// printed as #REF!, so the formula was lost on the next row insert.
+test("a range open at one end keeps its open end and follows its bound end", () => {
+  const inserted = frame(tab("s1", "Budget", rowsOf("s1", 100, ["new"]), colsOf("s1", 3)));
+  const deleted = frame(tab("s1", "Budget", rowsOf("s1", 100).filter((id) => id !== "s1r2"), colsOf("s1", 3)));
+  expect(printed("=SUM(A2:A)", "s1", oneTab, oneTab)).toBe("=SUM(A2:A)");
+  expect(printed("=SUM(A2:A)", "s1", oneTab, inserted)).toBe("=SUM(A3:A)");
+  expect(printed("=SUM(A2:A)", "s1", oneTab, deleted)).toBe("=SUM(A2:A)");
+  expect(printed("=SUM($B$2:B)+Budget!C5:C", "s2", book, book)).toBe("=SUM($B$2:B)+Budget!C5:C");
+  expect(printed("=SUM(A200:A)", "s1", oneTab, inserted)).toBe("=SUM(A200:A)");
+});
+
+test("the standard spelling capitalizes names and prints references from the tabs' names", () => {
+  expect(standard("=sum(a1:a3)", "s1", book)).toBe("=SUM(A1:A3)");
+  expect(standard("=budget!b2*2", "s2", book)).toBe("=Budget!B2*2");
+  expect(standard("=if(true, a2:a, false)", "s1", book)).toBe("=IF(TRUE, A2:A, FALSE)");
+  expect(standard("=sum(", "s1", book)).toBe("=sum(");
 });

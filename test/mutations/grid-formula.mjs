@@ -1,5 +1,6 @@
 // node test/mutations/grid-formula.mjs [rule-6|rule-7|name-restore|float-restore|typed-restore|
-//   take-back|bind-set-inverse|enc-past-end|growing-set|slot-keys|by-pos-tie|reversed-span|text-not-formula|na-literal|stale-back]
+//   take-back|bind-set-inverse|enc-past-end|growing-set|slot-keys|by-pos-tie|reversed-span|text-not-formula|na-literal|stale-back|
+//   open-end|standard-names]
 // Each entry removes one rule from the formula text or the workbook apply and names the test that
 // must then fail. With no argument every entry runs, one after another.
 import { mutate } from "./harness.mjs";
@@ -147,6 +148,24 @@ mutate({
     replace: "",
     test: BOOK_TEST,
     name: "a refused undo leaves no stale mark from the formula it brought back",
+    expects: RED,
+  },
+  "open-end": {
+    what: "a range open at one end (B2:B) is printed as a closed range, so it becomes #REF!",
+    file: TEXT,
+    find: " || half(ref.r0, ref.r1) || half(ref.c0, ref.c1);",
+    replace: ";",
+    test: BOOK_TEST,
+    name: "a range open at its bottom follows a row insert and a delete and keeps its open end",
+    expects: RED,
+  },
+  "standard-names": {
+    what: "the standard spelling keeps function names as typed",
+    file: TEXT,
+    find: '(token.type === "name" ? token.value : token.value ? "TRUE" : "FALSE")',
+    replace: "src.slice(token.start, token.end)",
+    test: TEXT_TEST,
+    name: "the standard spelling capitalizes names and prints references from the tabs' names",
     expects: RED,
   },
 });

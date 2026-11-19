@@ -80,6 +80,8 @@ function randomRef(rand, home, otherSheet, otherName) {
     return `${prefix}${colName(c0)}${r0}:${colName(c1)}${r1}`;
   }
   const x = Math.floor(rand() * cols);
+  // A range open at its bottom, as people total a column below its header (`B2:B`).
+  if (k < 0.93) return `${prefix}${colName(x)}${row()}:${colName(x)}`;
   const y = Math.min(cols - 1, x + Math.floor(rand() * 2));
   return `${prefix}${colName(x)}:${colName(y)}`;
 }
