@@ -169,7 +169,11 @@ function buildPluginClassic(file) {
   return pluginHeader(`dist/sap-plugins/${file}.js`) + fs.readFileSync(built, 'utf8').trim() + '\n'
 }
 
-const PLUGIN_DESTINATIONS = Object.values(MANIFEST).map(facts => facts.file || facts.name).flatMap(file => [
+// The grid's two extension plugins load after a sheet opens, so the manifest does not name them,
+// but ClayJS ships them the same two ways (EXTRA_PLUGINS in its build).
+const EXTRA_PLUGINS = ['grid-functions', 'grid-formats']
+
+const PLUGIN_DESTINATIONS = [...Object.values(MANIFEST).map(facts => facts.file || facts.name), ...EXTRA_PLUGINS].flatMap(file => [
   { client: 'clayjs', path: `clayjs/src/vendor/sap-${file}.vendor.js`, build: () => buildPluginEsm(file), needsDist: false },
   { client: 'clayjs', path: `clayjs/entries/sap-plugins/${file}.js`, build: () => buildPluginClassic(file), ownFolder: true }
 ])
