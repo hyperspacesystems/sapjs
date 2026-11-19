@@ -66,6 +66,8 @@ export function createPlugins(runtime, Sap, scheduler) {
   // nothing.
   function declare(facts) {
     if (!known.has(facts.name)) learn(facts);
+    // A page's own address for a plugin the manifest names, which has not loaded yet, wins.
+    else if (typeof facts.url === "string" && !installed.has(facts.name)) learn({ name: facts.name, url: facts.url });
   }
 
   // A definition joins the list every engine on the page shares, and adds what a
@@ -143,6 +145,7 @@ export function createPlugins(runtime, Sap, scheduler) {
     Object.assign(Sap, made.api);
     installed.set(name, feature);
     failed.delete(name);
+    loading.delete(name);
     setInstalled(name, made.directives || true);
     refresh();
     withDomMutationPaused(() => marked.forEach(clearBeacon));
@@ -200,6 +203,8 @@ export function createPlugins(runtime, Sap, scheduler) {
     const p = attempt.finally(() => loading.delete(name)).then(
       () => apiOf(name),
       (error) => {
+        // Sap.use installed it while this load was failing: nothing failed.
+        if (installed.has(name)) return apiOf(name);
         failed.set(name, error);
         listening ||= !w.addEventListener?.("online", () => api.retry());
         // The pass this starts reports E52 in every app that still asks for the plugin.
@@ -239,6 +244,9 @@ export function createPlugins(runtime, Sap, scheduler) {
     for (const name of new Set([...pass.wanted.keys(), ...pass.waiting, ...listed(app.root)])) {
       if (installed.has(name)) continue;
       const error = failed.get(name);
+      // A shipped plugin this engine has no address for (an engine inlined in a page, or vendored
+      // without its plugin folder) is not fetched: its boundary keeps its saved markup.
+      if (!error && MANIFEST[name] && !api.loader && !api.base && !known.get(name)?.url) continue;
       if (!error) load(name).catch(() => {});
       else {
         const at = pass.wanted.get(name)?.[0] || app.root;

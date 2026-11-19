@@ -14,11 +14,14 @@ const boundaries = new Map(); // attribute -> { name, plugin, opaque, on, instal
 // a colon. `parse` is null until the plugin installs.
 const directives = new Map(); // name -> { name, plugin, key, impure, parse }
 let selector = "";
+// Attributes a boundary's plugin uses on the boundary element itself, which are not typos.
+const boundaryAttrs = new Set();
 
 // The first plugin to declare an attribute keeps it.
 export function declareFacts(facts) {
   for (const [name, b] of Object.entries(facts.boundaries || {})) {
     if (claimable(name)) boundaries.set(name, { name, plugin: facts.name, opaque: !!b.opaque, on: b.on || null, installed: false });
+    for (const attr of b.attrs || []) boundaryAttrs.add(attr);
   }
   for (const [name, d] of Object.entries(facts.directives || {})) {
     if (claimable(name)) directives.set(name, { name, plugin: facts.name, key: d.key, impure: !!d.impure, parse: null });
@@ -49,7 +52,7 @@ export function directiveFor(name) {
 }
 
 export function declaredAttr(name) {
-  return !!ownerOf(name) || directives.has(name.slice(0, name.indexOf(":") + 1));
+  return !!ownerOf(name) || boundaryAttrs.has(name) || directives.has(name.slice(0, name.indexOf(":") + 1));
 }
 
 // Matches every element that may start a plugin boundary; empty when none is declared.

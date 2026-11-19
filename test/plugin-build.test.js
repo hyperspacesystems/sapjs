@@ -3,7 +3,7 @@
 // one: the `tally` fixture, named in the copy's manifest and kept in src/plugins/. The
 // build writes dist/sap-plugins/tally.js, the built engine loads it on demand with no
 // declaration in the page, the package exports its source, and propagate writes both
-// ClayJS copies. This project itself ships no plugin yet.
+// ClayJS copies. This project itself ships one plugin, the grid.
 
 const { execFileSync, spawnSync } = require("node:child_process");
 const { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
@@ -119,13 +119,13 @@ test("propagate: ClayJS gets an ES module copy and a classic copy, and the check
   expect(missing.stderr).toContain("✗ missing: clayjs/src/vendor/sap-tally.vendor.js");
 });
 
-test("today: this project names no plugin, builds no plugin file, and propagates the same eight files", () => {
-  expect(existsSync(join(root, "dist", "sap-plugins"))).toBe(false);
-  expect(require("../src/plugin-manifest.js").MANIFEST).toEqual({});
+test("today: this project ships the grid plugin, built and propagated to ClayJS beside the eight core files", () => {
+  expect(Object.keys(require("../src/plugin-manifest.js").MANIFEST)).toEqual(["grid"]);
+  expect(existsSync(join(root, "dist", "sap-plugins", "grid.js"))).toBe(true);
   const empty = join(copy, "workspace-today");
   for (const folder of ["clayjs/entries", "clayjs/src/vendor", "hyperclayjs/src/vendor", "hyper-html-api/src/codecs"]) mkdirSync(join(empty, folder), { recursive: true });
   const wrote = execFileSync(process.execPath, [join(root, "scripts", "propagate.js"), "--root", empty], { encoding: "utf8" });
-  expect(wrote.trim().split("\n")).toHaveLength(8);
+  expect(wrote.trim().split("\n")).toHaveLength(10);
   const checked = execFileSync(process.execPath, [join(root, "scripts", "propagate.js"), "--root", empty, "--check"], { encoding: "utf8" });
   expect(checked.trim().split("\n").map((line) => line.replace("✓ in sync ", ""))).toEqual([
     "clayjs/entries/sap.js",
@@ -136,6 +136,8 @@ test("today: this project names no plugin, builds no plugin file, and propagates
     "clayjs/src/vendor/sap-ownership.vendor.js",
     "hyper-html-api/src/codecs/sheet.vendor.js",
     "hyper-html-api/src/codecs/formula.vendor.js",
+    "clayjs/src/vendor/sap-grid.vendor.js",
+    "clayjs/entries/sap-plugins/grid.js",
   ]);
-  expect(existsSync(join(empty, "clayjs", "entries", "sap-plugins"))).toBe(false);
+  expect(readFileSync(join(empty, "clayjs", "entries", "sap-plugins", "grid.js"), "utf8")).toContain("w.Sap&&w.Sap.use&&w.Sap.use(d)");
 });

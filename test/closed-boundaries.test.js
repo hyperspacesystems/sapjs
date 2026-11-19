@@ -92,9 +92,10 @@ async function cellReads(fn) {
 }
 
 describe("dispatch: which elements are plugin boundaries", () => {
-  test("the manifest ships no first party plugin yet", () => {
+  test("the manifest ships the grid, a boundary on table only", () => {
     expect(PLUGIN_API).toBe(1);
-    expect(MANIFEST).toEqual({});
+    expect(Object.keys(MANIFEST)).toEqual(["grid"]);
+    expect(MANIFEST.grid.boundaries.grid.on).toBe("table");
   });
 
   test("dispatch: a boundary is recognized only on its declared tag", () => {

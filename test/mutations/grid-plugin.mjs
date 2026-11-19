@@ -1,7 +1,7 @@
 // node test/mutations/grid-plugin.mjs [plugin-echo|plugin-changes|plugin-full|plugin-paused|plugin-on-table
 //   |plugin-schedule|plugin-per-change|plugin-remove-parent|plugin-forget|plugin-forget-dispose
 //   |plugin-api-map|plugin-unmount|plugin-ownership-old|plugin-lint-list|plugin-lint-follow
-//   |plugin-lint-claim|plugin-maywrite|plugin-load-repairs|plugin-disposed]
+//   |plugin-maywrite|plugin-load-repairs|plugin-disposed]
 // Each entry puts one bug back into the grid plugin, or into the row read it relies on, and names
 // the test that must then fail. With no argument every entry runs, one after another.
 import { pathToFileURL } from "node:url";
@@ -40,7 +40,7 @@ export const MUTATIONS = {
     "const options = { write: (fn) => fn(),",
     "a write schedules one pass, and a write of derived parts only lists no change in it",
   ),
-  "plugin-on-table": plugin('the boundary drops on: "table"', 'boundaries: { grid: { opaque: true, on: "table" } },', "boundaries: { grid: { opaque: true } },", "a grid attribute on a div is ignored", /takes a <table grid> element|toEqual|toBe/),
+  "plugin-on-table": { ...plugin('the boundary drops on: "table"', 'boundaries: { grid: { opaque: true, on: "table", ', "boundaries: { grid: { opaque: true, ", "a grid attribute on a div is ignored", /takes a <table grid> element|toEqual|toBe/), file: "src/plugin-manifest.js" },
   "plugin-schedule": plugin(
     "an applied write asks for no pass",
     'schedule: (table) => kit.schedule(table, "plugin:grid") };',
@@ -68,12 +68,12 @@ export const MUTATIONS = {
     "Sap.grid exists after install, and Sap.use called twice still gives one grid per table",
   ),
   "plugin-unmount": plugin("dispose keeps every Grid", "        for (const [table, known] of tables) forget(table, known);\n", "", "Sap.unmount leaves no listener"),
-  "plugin-ownership-old": plugin(
+  "plugin-ownership-old": { ...plugin(
     "the old rules are back: a formula cell's text and v and a value cell's shown text are painted",
-    'ownership: [{ within: TABLE, select: "td", attrs: ["n"] }],',
-    'ownership: [\n    { within: TABLE, select: "td[f]", text: true, attrs: ["v"] },\n    { within: TABLE, select: "td[v]:not([f])", text: true },\n    { within: TABLE, select: "td", attrs: ["n"] },\n  ],',
+    '  { plugin: "grid", within: "table[grid]", select: "td", attrs: ["n"] },\n',
+    '  { plugin: "grid", within: "table[grid]", select: "td[f]", text: true, attrs: ["v"] },\n  { plugin: "grid", within: "table[grid]", select: "td[v]:not([f])", text: true },\n  { plugin: "grid", within: "table[grid]", select: "td", attrs: ["n"] },\n',
     "painted parts:",
-  ),
+  ), file: "src/ownership.js" },
   "plugin-lint-list": plugin("issues are never listed", "      if (codes.length === 0) return;\n", "      return;\n", LINT),
   "plugin-lint-follow": plugin(
     "the list is made once and never follows the issues",
@@ -81,7 +81,6 @@ export const MUTATIONS = {
     "if (before !== undefined) return;",
     LINT,
   ),
-  "plugin-lint-claim": plugin("lint does not know the table's own attributes", 'const OWN_ATTRIBUTES = ["freeze-cols", "stale"];', "const OWN_ATTRIBUTES = [];", LINT),
   "plugin-maywrite": plugin(
     "the grid is told every page may write",
     "mayWrite: kit.mayWrite,",

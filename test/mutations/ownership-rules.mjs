@@ -1,6 +1,8 @@
 // node test/mutations/ownership-rules.mjs [name ...]
 // Each entry removes one part of the plugin ownership rules, or of the walk that asks a
 // boundary by selector, and names the test that must then fail.
+// The walk's empty-rule guard (`!rules.length`) has no entry: the rule list always holds the
+// grid's rule since the grid joined the manifest, so a page with no rule cannot happen today.
 import { mutate } from "./harness.mjs";
 
 const RULES = "test/ownership-rules.test.js";
@@ -189,8 +191,8 @@ mutate({
   ),
   table: m(
     "a static rule names a plugin the manifest does not know",
-    "export const PLUGIN_RULES = [];",
-    'export const PLUGIN_RULES = [{ plugin: "ghost", within: "table[ghost]", select: "td", text: true }];',
+    "export const PLUGIN_RULES = [\n",
+    'export const PLUGIN_RULES = [\n  { plugin: "ghost", within: "table[ghost]", select: "td", text: true },\n',
     "table: every static rule belongs to a plugin the manifest names",
   ),
   "walk-skips": m(
@@ -276,14 +278,6 @@ mutate({
     "      if (list.length > all.length) all = list;\n",
     "",
     "cells: a boundary is asked by selector",
-  ),
-  "pages-no-rules": m(
-    "a page with no rule asks for a boundary",
-    "if (!rules.length || !boundaryAt(el, within)) return",
-    "if (!boundaryAt(el, within)) return",
-    "unchanged: every demo is walked, asked and stripped exactly as 0.7.1 did",
-    /not a valid selector|SyntaxError/,
-    PAGES,
   ),
   "pages-walk-ignored": m(
     "with a rule on the page, the walk reads a template row as painted",

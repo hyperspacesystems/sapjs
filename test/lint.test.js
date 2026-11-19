@@ -88,6 +88,11 @@ describe("mount lint: warnings never halt", () => {
     expect(Sap.status().apps[0].ok).toBe(true);
   });
 
+  // Bug this guards: a sheet saved with stale warned "did you mean: state" before the grid loaded.
+  test("the grid's own table attributes are not typos before the grid plugin loads", () => {
+    expect(warnsFor(`<main sap><table grid stale freeze-cols="1"><tbody><tr><td>1</td></tr></tbody></table></main>`)).not.toContain("W03");
+  });
+
   test("attr:hidden warns and redirects to show", () => {
     expect(warnsFor(`<main sap><p attr:hidden="state.x">hi</p></main>`)).toContain("W03");
   });

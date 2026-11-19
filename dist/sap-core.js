@@ -308,9 +308,11 @@ var SapCoreBundle = (() => {
   var boundaries = /* @__PURE__ */ new Map();
   var directives = /* @__PURE__ */ new Map();
   var selector = "";
+  var boundaryAttrs = /* @__PURE__ */ new Set();
   function declareFacts(facts) {
     for (const [name, b] of Object.entries(facts.boundaries || {})) {
       if (claimable(name)) boundaries.set(name, { name, plugin: facts.name, opaque: !!b.opaque, on: b.on || null, installed: false });
+      for (const attr of b.attrs || []) boundaryAttrs.add(attr);
     }
     for (const [name, d] of Object.entries(facts.directives || {})) {
       if (claimable(name)) directives.set(name, { name, plugin: facts.name, key: d.key, impure: !!d.impure, parse: null });
@@ -331,7 +333,7 @@ var SapCoreBundle = (() => {
     return directives.get(name);
   }
   function declaredAttr(name) {
-    return !!ownerOf(name) || directives.has(name.slice(0, name.indexOf(":") + 1));
+    return !!ownerOf(name) || boundaryAttrs.has(name) || directives.has(name.slice(0, name.indexOf(":") + 1));
   }
   function boundaryOf(el) {
     if (!selector) return null;
@@ -2201,7 +2203,11 @@ ${src}` : `"use strict"; return (${src});`;
 
   // src/plugin-manifest.js
   var PLUGIN_API = 1;
-  var MANIFEST = {};
+  var MANIFEST = {
+    // A <table grid> is a sheet: the engine stays out of it and loads the grid plugin.
+    // `attrs` are the grid's own attributes on the table, which lint knows before the plugin loads.
+    grid: { name: "grid", order: 5, boundaries: { grid: { opaque: true, on: "table", attrs: ["freeze-cols", "stale"] } } }
+  };
 
   // src/plugins.js
   var CDN = /^(https:\/\/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com)\/@panphora\/sapjs)(?=[@/]|$)/;
@@ -2238,6 +2244,7 @@ ${src}` : `"use strict"; return (${src});`;
     }
     function declare(facts) {
       if (!known.has(facts.name)) learn(facts);
+      else if (typeof facts.url === "string" && !installed2.has(facts.name)) learn({ name: facts.name, url: facts.url });
     }
     function publish(def) {
       if (!shared.includes(def)) shared.push(def);
@@ -2307,6 +2314,7 @@ ${src}` : `"use strict"; return (${src});`;
       Object.assign(Sap2, made.api);
       installed2.set(name, feature);
       failed.delete(name);
+      loading.delete(name);
       setInstalled(name, made.directives || true);
       refresh();
       withDomMutationPaused(() => marked.forEach(clearBeacon));
@@ -2355,6 +2363,7 @@ ${src}` : `"use strict"; return (${src});`;
       const p = attempt.finally(() => loading.delete(name)).then(
         () => apiOf(name),
         (error) => {
+          if (installed2.has(name)) return apiOf(name);
           failed.set(name, error);
           listening ||= !w.addEventListener?.("online", () => api.retry());
           wake("plugin-failed:" + name);
@@ -2384,6 +2393,7 @@ ${src}` : `"use strict"; return (${src});`;
       for (const name of /* @__PURE__ */ new Set([...pass.wanted.keys(), ...pass.waiting, ...listed(app.root)])) {
         if (installed2.has(name)) continue;
         const error = failed.get(name);
+        if (!error && MANIFEST[name] && !api.loader && !api.base && !known.get(name)?.url) continue;
         if (!error) load(name).catch(() => {
         });
         else {

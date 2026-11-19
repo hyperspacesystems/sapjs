@@ -14,11 +14,11 @@ const host = (what, find, replace, name, expects, file = P) => ({ what, file, fi
 mutate({
   // Sap.use
   "api-number": host("a definition for another contract number installs", 'typeof name !== "string" || speaks !== PLUGIN_API', 'typeof name !== "string"', "refuse: another contract number", /did not throw/),
-  once: host("a second Sap.use of an installed plugin sets it up again", "    if (installed.has(name)) return apiOf(name);\n", "", "install: returns the plugin's api", /name is taken|toBe/),
+  once: host("a second Sap.use of an installed plugin sets it up again", "    if (off) return null;\n    if (installed.has(name)) return apiOf(name);\n", "    if (off) return null;\n", "install: returns the plugin's api", /name is taken|toBe/),
   "shared-once": host("a definition already in window.sapPlugins is pushed again", "if (!shared.includes(def)) shared.push(def);", "shared.push(def);", "early: definitions that arrived before the engine", /toHaveLength/),
   "shared-push": host("Sap.use does not put the definition in window.sapPlugins", "    if (!shared.includes(def)) shared.push(def);\n", "", "second engine: it installs every definition", /toHaveLength/),
   "declare-again": host("a definition does not add to what was declared under its name", "    if (!shared.includes(def)) shared.push(def);\n    learn(def);", "    if (!shared.includes(def)) shared.push(def);\n    declare(def);", "declare: a definition adds what an earlier declaration left out", /cannot add|toBe/),
-  "declare-once": host("a second declaration under one name changes the first", "    if (!known.has(facts.name)) learn(facts);", "    learn(facts);", "declare: a definition adds what an earlier declaration left out", /toBe/),
+  "declare-once": host("a second declaration under one name changes the first", "    if (!known.has(facts.name)) learn(facts);\n    // A page's", "    learn(facts);\n    if (false) learn(facts);\n    // A page's", "declare: a definition adds what an earlier declaration left out", /toBe/),
   "requires-block": host("a definition installs before what it requires", "if ((def.requires || []).some((r) => !installed.has(r))) {", "if (false) {", "requires: a definition waits for what it requires", /child broke|toBe|toEqual/),
   unblock: host("a held definition is never tried again", "    blocked.splice(0).forEach(tryUse);\n", "", "requires: a definition waits for what it requires", /toEqual/),
   supplied: host("a declared name that setup does not supply is accepted", 'typeof (made[part] || {})[n] !== "function" || taken(n)', "taken(n)", "declares and setup does not supply", /toThrow/),
@@ -52,7 +52,7 @@ mutate({
   // loading
   "manifest-declare": host("the host does not read the manifest", "  for (const facts of Object.values(MANIFEST)) declare(facts);\n", "", "manifest: a plugin the release ships facts for", /toEqual/),
   "one-promise": host("two calls for one plugin start two loads", "    if (loading.has(name)) return loading.get(name);\n", "", "requires: what a plugin requires loads first", /toBe/),
-  "loading-clear": host("a finished load stays listed as loading", "attempt.finally(() => loading.delete(name))", "attempt", "requires: what a plugin requires loads first", /toEqual/),
+  "loading-clear": host("a finished load stays listed as loading", "attempt.finally(() => loading.delete(name))", "attempt", "retry: after the third failure the plugin has failed", /toEqual/),
   "requires-first": host("a plugin is fetched before what it requires", "Promise.all((known.get(name)?.requires || []).map(load)).then(() => fetchOnce(name))", "Promise.resolve().then(() => fetchOnce(name))", "requires: what a plugin requires loads first", /toEqual|did not register/),
   "mod-default": host("a module's default export is not read", "mod?.default || mod || shared.find", "mod || shared.find", "requires: what a plugin requires loads first", /did not register/),
   "retry-delays": host("a failed try is never repeated", "    for (const ms of api.retryDelays) attempt = attempt.catch(() => wait(ms).then(() => fetchOnce(name)));\n", "", "retry: one try, one more after 1 second", /toBe/),
@@ -158,5 +158,9 @@ mutate({
   "hole-label": host("template text after a hole is read as code, so a label asks for a plugin", "|[`}](?:", "|`(?:", "label: a helper name in template text after a hole asks for no plugin", /toBe|toEqual/, "src/compile.js"),
   "hole-call": host("template text after a hole is read as code, so a call beside it never asks for its plugin", "|[`}](?:", "|`(?:", "call: a helper call after template text asks for its plugin", /toBe|toEqual/, "src/compile.js"),
   "global-refresh": host("a refresh after the page defines a helper's name leaves the app waiting", "  if (!entry.waits) cache.set(key, entry);", "  cache.set(key, entry);", "global: a function the page defines after mount ends the wait", /toBe/, "src/compile.js"),
+  "manifest-no-address": host("a shipped plugin with no address is fetched anyway", "      if (!error && MANIFEST[name] && !api.loader && !api.base && !known.get(name)?.url) continue;\n", "", "script: a shipped plugin with no address is not fetched", /toEqual/),
+  "use-ends-load": host("Sap.use leaves a load in flight listed", "    failed.delete(name);\n    loading.delete(name);\n", "    failed.delete(name);\n", "script: Sap.use while the same plugin is loading ends the load", /toEqual/),
+  "declare-url": host("a page's url for a plugin the manifest names is dropped", '    else if (typeof facts.url === "string" && !installed.has(facts.name)) learn({ name: facts.name, url: facts.url });\n', "", "script: a page's url for a plugin the manifest names is the address", /toEqual/),
+  "boundary-attrs": { what: "a boundary's own attributes are typos to lint", file: "src/registry.js", find: "    for (const attr of b.attrs || []) boundaryAttrs.add(attr);\n", replace: "", test: "test/lint.test.js", name: "the grid's own table attributes are not typos", expects: /toContain|not/ },
   size: { what: "the core build grows by 600 bytes that do not compress", file: P, find: "  Sap.flush = flush;\n", replace: `  Sap.flush = flush;\n  Sap.pad = "${Array.from({ length: 150 }, (_, i) => ((i * 2654435761) % 4294967296).toString(36)).join("")}";\n`, build: true, test: "test/core-size.test.js", name: "the core build has grown by no more than", expects: /toBeLessThanOrEqual/ },
 });

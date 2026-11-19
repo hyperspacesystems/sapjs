@@ -12,32 +12,23 @@
 // A table that left the page is forgotten at the next pass: its Grid is disposed, and Sap.grid
 // makes a new one if the table comes back. The kinds of issue a sheet has are listed in its
 // app's report, and the list follows the sheet: it changes when the issues change and goes when
-// the sheet goes. Loading writes nothing. The plugin is not in the manifest yet, so a page
-// installs it with Sap.use.
+// the sheet goes. Loading writes nothing. The manifest names the plugin, so the built engine
+// loads it when a page has a <table grid>; its ownership rule is in ownership.js.
 
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../grid/csv.js";
 import { createSheetWriter } from "../grid/codec/cached-writer.js";
 import { formatValue } from "../grid/format.js";
+import { tokenize } from "../grid/formula/text.js";
 import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
+import { MANIFEST } from "../plugin-manifest.js";
 
 const TABLE = "table[grid]";
 
-// The table attributes that belong to the grid: lint takes them as known.
-const OWN_ATTRIBUTES = ["freeze-cols", "stale"];
-
 export default {
-  name: "grid",
+  ...MANIFEST.grid,
   version: "0.1.0",
   api: 1,
-  order: 5,
-  boundaries: { grid: { opaque: true, on: "table" } },
-  // What a host such as ClayJS leaves out of its undo, its live-sync merges and its paint check.
-  // Only `n` is declared. A formula's text and v and a value cell's shown text are the file's to a
-  // host: its undo puts back the v that typing a formula over a number removed, its merges carry
-  // them from tab to tab as written, and the text the stale refresh paints when a sheet opens is no
-  // painted difference, so opening a sheet saves nothing.
-  ownership: [{ within: TABLE, select: "td", attrs: ["n"] }],
 
   setup(kit) {
     const tables = new Map();
@@ -55,6 +46,8 @@ export default {
       parseInput,
       editText,
       formatValue,
+      // The formula tokenizer, which a host's editor reads for reference outlines and picking.
+      tokenize,
       csv: { detectDelimiter, parseDelimited, writeDelimited, protectField },
       newId,
       createSheetWriter: () => createSheetWriter(),
@@ -126,9 +119,6 @@ export default {
           else nodes.push(at);
         }
         for (const [known, nodes] of touched) known.foreignWrite(nodes);
-      },
-      lint(el, halt, claimed) {
-        if (el.localName === "table" && el.hasAttribute("grid")) for (const name of OWN_ATTRIBUTES) claimed(name);
       },
       flush: () => null,
       dispose() {

@@ -3,6 +3,7 @@
 // nothing. Every other test installs the plugin itself, because Sap.use is safe to call again,
 // so each one also runs alone. Sap.unmount hands the page away for good, so its test is last.
 
+import { tokenize } from "../../src/grid/formula/text.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -148,6 +149,9 @@ test("Sap.grid exists after install, and Sap.use called twice still gives one gr
   expect([Sap.plugins.has("grid"), typeof Sap.grid, api.grid]).toEqual([true, "function", Sap.grid]);
   expect([Sap.grid.parseInput, Sap.grid.editText, Sap.grid.formatValue, Sap.grid.newId]).toEqual([parseInput, editText, formatValue, newId]);
   expect(Sap.grid.csv).toEqual({ detectDelimiter, parseDelimited, writeDelimited, protectField });
+  // Bug this guards: ClayJS's formula editor reads Sap.grid.tokenize; without it, clicking a cell
+  // while typing a formula inserts no reference.
+  expect(Sap.grid.tokenize).toBe(tokenize);
 
   // Asked for before the plugin's first pass, with a raw edit in the same turn: the pass that
   // follows the install reads it.

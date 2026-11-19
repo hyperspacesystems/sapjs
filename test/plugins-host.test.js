@@ -555,7 +555,7 @@ describe("directives and paint kinds", () => {
 describe("helper calls beside template text", () => {
   test("label: a helper name in template text after a hole asks for no plugin, and the app paints", async () => {
     boot();
-    Sap.plugins.declare({ name: "grid", helpers: ["cell", "range"] });
+    Sap.plugins.declare({ name: "cells", helpers: ["cell", "range"] });
     Sap.plugins.loader = () => { throw new Error("nothing should load"); };
     const root = mount('<main sap state="n:num" n="3"><output text="`${state.n} items in range (all)`">saved</output><b text="state.n">saved</b></main>');
     await tick();
@@ -567,7 +567,7 @@ describe("helper calls beside template text", () => {
 
   test("call: a helper call after template text asks for its plugin, and the app paints when it arrives", async () => {
     boot();
-    Sap.plugins.declare({ name: "grid", helpers: ["cell"] });
+    Sap.plugins.declare({ name: "cells", helpers: ["cell"] });
     const asked = [];
     Sap.plugins.loader = (name) => {
       asked.push(name);
@@ -577,7 +577,7 @@ describe("helper calls beside template text", () => {
     expect(root.querySelector("output").textContent).toBe("saved");
     expect(errors()).toEqual([]);
     await tick();
-    expect(asked).toEqual(["grid"]);
+    expect(asked).toEqual(["cells"]);
     expect(root.querySelector("output").textContent).toBe("3: 5 units");
     expect(root.querySelector("i").textContent).toBe("3's total: 40");
     expect(errors()).toEqual([]);
@@ -788,6 +788,38 @@ describe("loading", () => {
     await tick();
     expect(calls).toEqual([["third", "https://other.example/third.js"], ["plain", undefined]]);
     expect(scripts().map((s) => s.getAttribute("src"))).toEqual(["https://other.example/third.js", "https://files.example/p/plain.js"]);
+  });
+
+  // Bug this guards: an engine inlined in a page has no plugin folder, so a <table grid> asked for
+  // a file that cannot exist and showed E52 five seconds later.
+  test("script: a shipped plugin with no address is not fetched, and its boundary keeps its markup", async () => {
+    boot();
+    Sap.plugins.base = null;
+    const root = mount(`<main sap><table grid><tbody><tr><td>1</td></tr></tbody></table></main>`);
+    await tick();
+    expect([scripts().length, Sap.plugins.status().loading, root.querySelector("table").hasAttribute("sap-error")]).toEqual([0, [], false]);
+  });
+
+  // Bug this guards: Sap.use while the shipped grid was loading left "grid" loading for good.
+  test("script: Sap.use while the same plugin is loading ends the load", async () => {
+    boot();
+    Sap.plugins.base = "https://files.example/p/";
+    mount(`<main sap><table grid><tbody><tr><td>1</td></tr></tbody></table></main>`);
+    await tick();
+    expect(Sap.plugins.status().loading).toEqual(["grid"]);
+    Sap.use({ name: "grid", api: 1, boundaries: { grid: { opaque: true, on: "table" } }, setup: () => ({ boundaries: { grid: () => ({}) } }) });
+    expect(Sap.plugins.status()).toEqual({ installed: ["grid"], loading: [], failed: [] });
+  });
+
+  // Bug this guards: the manifest names the grid first, so a page's own address for it was
+  // ignored and the engine fetched a file the page never hosted.
+  test("script: a page's url for a plugin the manifest names is the address", async () => {
+    boot();
+    Sap.plugins.base = "https://files.example/p/";
+    Sap.plugins.declare({ name: "grid", url: "https://own.example/grid.js" });
+    Sap.plugins.load("grid").catch(() => {});
+    await tick();
+    expect(scripts().map((s) => s.getAttribute("src"))).toEqual(["https://own.example/grid.js"]);
   });
 
   test("script: a download that fails removes the tag and names the address", async () => {
@@ -1030,6 +1062,8 @@ describe("loading", () => {
       const reads = jest.spyOn(Element.prototype, "attributes", "get");
       try {
         Sap.use(kitDef());
+        // The manifest's grid is known on every page, so it is installed here as well.
+        Sap.use({ name: "grid", api: 1, setup: () => ({}) });
         reads.mockClear();
         expect(Sap.plugins.ready()).toBe(null);
         expect(reads).not.toHaveBeenCalled();

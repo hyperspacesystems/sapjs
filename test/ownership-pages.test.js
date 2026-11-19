@@ -1,7 +1,7 @@
 // Pages that use no plugin: every demo and worked app this project ships is mounted by
 // the real engine, then walked and stripped by today's ownership file and by the 0.7.1
 // one. The two must agree exactly, with no rule on the page and with a plugin's rules
-// that match nothing.
+// that match nothing. A table[grid] is the shipped grid rule's.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,15 +63,17 @@ test("unchanged: every demo is walked, asked and stripped exactly as 0.7.1 did, 
   expect(stripped).toBeGreaterThan(25);
 });
 
-test("unchanged: a page with a table[grid] and no rule on it is walked as 0.7.1 walked it", () => {
+// Bug this guards: a host that has not loaded the grid plugin yet (another tab, a snapshot)
+// treats a cell's `n` as the file's own, so its undo or merge writes it back.
+test("a table[grid] is the grid's from the start: the shipped rule paints in it with no definition on the page", () => {
   const host = mountAll(`<main sap state="t" t="Budget"><h1 text="state.t">x</h1><table grid><tbody><tr><td n f="=A1" text="state.t">1</td><td n show="state.t">2</td></tr></tbody></table></main>`);
-  const old = painted(host, before);
-  expect(old.visits).toHaveLength(3);
-  expect(painted(host, now)).toEqual(old);
-  window.sapPlugins = [{ name: "grid", ownership: GRID }];
-  expect(painted(host, now).visits.map(([el, p]) => [el.localName, p])).toEqual([
+  const visits = () => painted(host, now).visits.map(([el, p]) => [el.localName, p]);
+  const shipped = [
     ["h1", `{"attrs":[],"classes":[],"vars":[],"text":true}`],
-    ["td", `{"attrs":["n"],"classes":[],"vars":[],"text":true}`],
     ["td", `{"attrs":["n"],"classes":[],"vars":[],"text":false}`],
-  ]);
+    ["td", `{"attrs":["n"],"classes":[],"vars":[],"text":false}`],
+  ];
+  expect(visits()).toEqual(shipped);
+  window.sapPlugins = [{ name: "grid", ownership: GRID }];
+  expect(visits()).toEqual(shipped);
 });
