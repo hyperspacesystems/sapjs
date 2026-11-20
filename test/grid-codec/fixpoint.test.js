@@ -1,6 +1,6 @@
 import { FIXTURES } from "./support/fixtures.js";
 import { rng } from "./support/rng.js";
-import { rowHtml, colHtml, tableHtml } from "../../src/grid/codec/write.js";
+import { rowHtml, colHtml, ruleHtml, tableHtml } from "../../src/grid/codec/write.js";
 import { scanAt } from "./support/scan-helpers.js";
 
 const NAMES = Object.keys(FIXTURES);
@@ -10,6 +10,7 @@ const CHARACTERS = ["<", ">", "&", '"', "'", "=", "/", " ", "\t", "\n", "\r", "\
 
 function fixpoint(src, result) {
   for (const { row, bytes } of result.rows) expect(rowHtml(row)).toBe(bytes);
+  for (const { rule, bytes } of result.rules) expect(ruleHtml(rule)).toBe(bytes);
   const cols = result.cols.map(colHtml).join("");
   const at = src.indexOf("<colgroup>") + 10;
   expect(src.startsWith(cols, at)).toBe(true);
@@ -30,12 +31,12 @@ test("every fixture's every sheet is a fixpoint of the writer", () => {
 });
 
 test("2000 seeded mutants are either refused or a fixpoint", () => {
-  const sources = [tableHtml(FIXTURES.tiny().sheets[0]), tableHtml(FIXTURES.escapes().sheets[0])];
+  const sources = [tableHtml(FIXTURES.tiny().sheets[0]), tableHtml(FIXTURES.escapes().sheets[0]), tableHtml(FIXTURES.rules().sheets[0])];
   const random = rng(SEED);
   let accepted = 0;
 
   for (let n = 0; n < MUTANTS; n++) {
-    const src = sources[n % 2];
+    const src = sources[n % 3];
     const at = Math.floor(random() * src.length);
     const op = Math.floor(random() * 3);
     const character = CHARACTERS[Math.floor(random() * CHARACTERS.length)];

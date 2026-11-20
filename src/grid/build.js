@@ -486,3 +486,8 @@ export function buildFreeze(view, { rows, cols } = {}) {
   }
   return action.rowsThrough === undefined && action.colsThrough === undefined ? null : action;
 }
+
+// Adds or replaces rules by id and removes rules by id (GRAMMAR.md, "Rules").
+export function buildRules(view, { set = [], remove = [] } = {}) {
+  return set.length === 0 && remove.length === 0 ? null : { v: 1, t: "rules", sheet: sheetOf(view), set, remove };
+}

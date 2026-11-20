@@ -562,3 +562,34 @@ test("deleting the first row of a custom-format merge keeps its text", () => {
   expect(out.out).toBe("applied");
   expect(rowLine(bytesOf(store), "r2")).toEqual(expect.stringContaining("12.3k"));
 });
+
+test("a rules action adds, replaces and removes rules, and its inverse puts them back", () => {
+  const store = backing({ formula: false });
+  const first = { id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] };
+  const second = { id: "y", pos: "O", kind: "check", range: "A1:A9" };
+  const added = apply(store, action("rules", { set: [first, second], remove: [] }), { derive });
+  expect(added.out).toBe("applied");
+  expect(store.rules()).toEqual([second, first]);
+
+  const replaced = { id: "x", pos: "V", kind: "list", range: "C3:C41", items: ["Open", "Done"] };
+  const changed = apply(store, action("rules", { set: [replaced], remove: ["y"] }), { derive });
+  expect(changed.out).toBe("applied");
+  expect(store.rules()).toEqual([replaced]);
+
+  expect(apply(store, changed.inverse, { derive }).out).toBe("applied");
+  expect(store.rules()).toEqual([second, first]);
+});
+
+test("a rules action is refused when its range names another tab, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch", () => {
+  const rule = (extra) => ({ id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"], ...extra });
+  const when = (extra) => ({ id: "w", pos: "O", kind: "when", range: "A2:D10", test: "formula", f: '=$D2="Late"', style: "background-color:#fde2e1", ...extra });
+  const bad = [
+    action("rules", { set: [rule({ range: "Other!C2:C40" })], remove: [] }),
+    action("rules", { set: [when({ f: "=SUM(" })], remove: [] }),
+    action("rules", { set: [when({ style: "color: #ff0000" })], remove: [] }),
+    action("rules", { set: [rule({}), rule({ pos: "O" })], remove: [] }),
+    { v: 1, t: "batch", actions: [action("rules", { set: [rule({})], remove: [] })] },
+  ];
+  for (const one of bad) expect(() => validate(one)).toThrow();
+  expect(() => validate(action("rules", { set: [{ ...rule({}), range: "C2:C40", source: undefined }], remove: [] }))).not.toThrow();
+});

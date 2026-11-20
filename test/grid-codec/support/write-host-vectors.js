@@ -18,16 +18,19 @@ import { buildKeys } from "./key-vectors.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, "..", "golden");
-const GOLDENS = ["tiny", "merged", "styled", "formulas-formatted", "empty", "two-tabs", "escapes", "hidden", "tall-merge"];
+const GOLDENS = ["tiny", "merged", "styled", "formulas-formatted", "empty", "two-tabs", "escapes", "hidden", "tall-merge", "rules"];
 const SEED = 20261111;
 const MUTANTS = 400;
+const RULE_MUTANTS = 100;
 const NUMBERS = 1000;
 const CHARACTERS = ["<", ">", "&", '"', "'", "=", "/", " ", "\t", "\n", "\r", "\0", "A", "a", "0", ";"];
 
 const result = (src) => {
   const out = scanAt(src, 0);
   if (out.verdict === "miss") return { verdict: "miss" };
-  return { verdict: "accept", table: out.table, cols: out.cols, rows: out.rows };
+  const entry = { verdict: "accept", table: out.table, cols: out.cols, rows: out.rows };
+  if (out.rules.length > 0) entry.rules = out.rules.map(({ rule }) => rule);
+  return entry;
 };
 
 const scan = [];
@@ -54,6 +57,24 @@ for (let n = 0; scan.length < GOLDENS.length + MISSES.length + MUTANTS; n++) {
         : src.slice(0, at) + character + src.slice(at + 1);
   if (!mutant.isWellFormed()) continue;
   scan.push({ name: `mutant ${n}`, src: mutant, ...result(mutant) });
+}
+
+const rulesRandom = rng(SEED + 1);
+const rulesSource = tableHtml(FIXTURES.rules().sheets[0]);
+let rulesMutants = 0;
+for (let n = 0; rulesMutants < RULE_MUTANTS; n++) {
+  const at = Math.floor(rulesRandom() * rulesSource.length);
+  const op = Math.floor(rulesRandom() * 3);
+  const character = CHARACTERS[Math.floor(rulesRandom() * CHARACTERS.length)];
+  const mutant =
+    op === 0
+      ? rulesSource.slice(0, at) + character + rulesSource.slice(at)
+      : op === 1
+        ? rulesSource.slice(0, at) + rulesSource.slice(at + 1)
+        : rulesSource.slice(0, at) + character + rulesSource.slice(at + 1);
+  if (!mutant.isWellFormed()) continue;
+  scan.push({ name: `rules mutant ${n}`, src: mutant, ...result(mutant) });
+  rulesMutants++;
 }
 
 const numbers = [];

@@ -5,8 +5,10 @@
 
 import { modelBacking } from "./backing-model.js";
 import { isKey } from "./codec/order-keys.js";
+import { copyRule, ruleProblem } from "./codec/rules.js";
 import { isCanonicalStyle, STYLE_PROPERTIES } from "./codec/styles.js";
-import { canonStyle, cleanDeclaration, declarationProperty, isMixedStyle, mixedNext, splitDeclarations } from "./styles.js";
+import { canonStyle, cleanDeclaration, cleanStyle, declarationProperty, isMixedStyle, mixedNext, splitDeclarations } from "./styles.js";
+import { parse } from "./formula/text.js";
 import { effectiveFmt, waitsForFormatter } from "./content.js";
 import { derivePlain } from "./derive-plain.js";
 import { isBuiltin } from "./format.js";
@@ -27,6 +29,7 @@ const FIELDS = {
   merge: ["v", "t", "sheet", "from", "to", "clears"],
   unmerge: ["v", "t", "sheet", "row", "col"],
   freeze: ["v", "t", "sheet", "rowsThrough", "colsThrough"],
+  rules: ["v", "t", "sheet", "set", "remove"],
   batch: ["v", "t", "actions"],
 };
 
@@ -369,6 +372,61 @@ function checkRecords(action) {
   }
 }
 
+const RULE_STYLE = new Set(["background-color", "color", "font-weight", "font-style", "text-decoration"]);
+
+// One A1 reference and nothing else around it: a cell or a range, on the rule's own tab unless
+// `anyTab`.
+function oneRef(text, anyTab) {
+  const parsed = parse(text);
+  if (parsed.error || parsed.refs.length !== 1) return false;
+  const node = parsed.refs[0];
+  return node.span[0] === 0 && node.span[1] === text.length && (anyTab || node.sheet === null);
+}
+
+function checkRule(rule, what) {
+  const problem = ruleProblem(rule);
+  if (problem !== null) bad(`${what}: ${problem}`);
+  for (const key of ["id", "pos", "range", "source", "a", "b", "f", "style"]) if (rule[key] !== undefined) checkText(rule[key], `${what}.${key}`);
+  if (!isKey(rule.pos)) bad(`${what}.pos is an order key`);
+  if (!oneRef(rule.range, false)) bad(`${what}.range is one range on its own tab`);
+  if (rule.source !== undefined && !rule.source.includes("#REF!") && !oneRef(rule.source, true)) bad(`${what}.source is one range`);
+  if (rule.f !== undefined && (!rule.f.startsWith("=") || parse(rule.f.slice(1)).error)) bad(`${what}.f is a formula`);
+  if (rule.style !== undefined && (cleanStyle(rule.style) !== rule.style || rule.style.split(";").some((pair) => !RULE_STYLE.has(pair.slice(0, pair.indexOf(":")))))) {
+    bad(`${what}.style is written as cleanStyle writes it, with only ${[...RULE_STYLE].join(", ")}`);
+  }
+}
+
+// Why a rule may not be written, or null: the checks a rules action runs on each rule it sets.
+export function ruleRefusal(rule) {
+  try {
+    checkRule(rule, "rule");
+    return null;
+  } catch (err) {
+    if (err instanceof GridRefused) return err.detail;
+    throw err;
+  }
+}
+
+// A rules action: whole rules to add or replace, and ids to remove, each named once. A source or a
+// formula a structure edit cut keeps its #REF!, as a formula cell does, so a rule edited after that
+// still validates.
+function checkRules(action) {
+  if (!Array.isArray(action.set) || !Array.isArray(action.remove)) bad("set and remove are lists");
+  const seen = new Set();
+  const once = (id) => {
+    if (seen.has(id)) bad(`rule ${id} is named twice`);
+    seen.add(id);
+  };
+  action.set.forEach((rule, index) => {
+    checkRule(rule, `set[${index}]`);
+    once(rule.id);
+  });
+  action.remove.forEach((id, index) => {
+    checkText(id, `remove[${index}]`);
+    once(id);
+  });
+}
+
 export function validate(action) {
   if (action === null || typeof action !== "object" || Array.isArray(action)) bad("an action is an object");
   if (action.v !== 1) bad("v is 1");
@@ -378,11 +436,13 @@ export function validate(action) {
     if (!Array.isArray(action.actions) || action.actions.length === 0) bad("actions is a non-empty list");
     action.actions.forEach((one, index) => {
       if (one !== null && typeof one === "object" && one.t === "batch") bad(`actions[${index}] is a batch inside a batch`);
+      if (one !== null && typeof one === "object" && one.t === "rules") bad(`actions[${index}] is a rules action, which is never part of a batch`);
       validate(one);
     });
     return;
   }
   checkText(action.sheet, "sheet");
+  if (action.t === "rules") return checkRules(action);
   if (action.t === "set" || action.t === "format") checkCells(action);
   checkRecords(action);
 }
@@ -393,6 +453,7 @@ const deletions = (action) => ({
 });
 
 export function creates(action) {
+  if (action.t === "rules") return { rows: [], cols: [] };
   if (action.t === "batch") {
     const rows = [];
     const cols = [];
@@ -433,6 +494,7 @@ export function creates(action) {
 }
 
 export function needs(action) {
+  if (action.t === "rules") return { rows: [], cols: [] };
   if (action.t === "batch") {
     const rows = [];
     const cols = [];
@@ -518,6 +580,7 @@ export function targets(action) {
       [action.sheet, action.row, action.col, "span"],
     ];
   }
+  if (action.t === "rules") return [...action.set.map((rule) => [action.sheet, "rule", rule.id, ""]), ...action.remove.map((id) => [action.sheet, "rule", id, ""])];
   if (action.t === "freeze") {
     const out = [];
     if (action.rowsThrough !== undefined) out.push([action.sheet, "table", "", "freezeRows"]);
@@ -923,14 +986,22 @@ function afterOf(backing, action) {
   return out.out === "applied" ? scratch : null;
 }
 
+// A grid with no formula engine cannot move formulas or rules: a row or column edit that moves an
+// existing row or column is refused when one moves a formula, or, on a sheet with rules, when rows
+// or columns came or went (a move alone leaves rules where they are).
 const guarded = (backing, action, formulas) => {
   if (formulas !== null) return false;
-  if (!backing.hasFormula()) return false;
+  const ruled = backing.rules().length > 0;
+  if (!ruled && !backing.hasFormula()) return false;
   const after = afterOf(backing, action);
   if (after === null) return false;
   const rows = new Set(backing.rows().map((row) => row.id).filter((id) => after.rowIndex(id) >= 0));
   const cols = new Set(backing.cols().map((col) => col.id).filter((id) => after.colIndex(id) >= 0));
-  return holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols);
+  if (ruled && (after.rows().length !== backing.rows().length || after.cols().length !== backing.cols().length)) {
+    const shifted = [...rows].some((id) => after.rowIndex(id) !== backing.rowIndex(id)) || [...cols].some((id) => after.colIndex(id) !== backing.colIndex(id));
+    if (shifted) return true;
+  }
+  return backing.hasFormula() && (holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols));
 };
 
 const engineRefusal = () => refusal("needs_formula_engine", "a row edit that moves an existing row needs the formula engine");
@@ -1582,6 +1653,24 @@ function writeFreeze(backing, action) {
   return { out: "applied", inverse, changes: { rows: [], cells: [], table } };
 }
 
+// A rules action replaces whole rules by id and removes rules by id; removing a rule that is not
+// there changes nothing. The inverse sets back each rule it replaced or removed and removes each it
+// added. The change is a table part, so a Grid fires its change event and the page saves.
+function writeRules(backing, action) {
+  const before = backing.rules();
+  const byId = new Map(before.map((rule) => [rule.id, rule]));
+  const named = new Set([...action.set.map((rule) => rule.id), ...action.remove]);
+  const inverse = { v: 1, t: "rules", sheet: action.sheet, set: [], remove: [] };
+  for (const id of named) {
+    const old = byId.get(id);
+    if (old !== undefined) inverse.set.push(old);
+    else if (!action.remove.includes(id)) inverse.remove.push(id);
+  }
+  backing.setRules([...before.filter((rule) => !named.has(rule.id)), ...action.set.map(copyRule)]);
+  const table = [{ sheet: action.sheet, field: "rules", before: JSON.stringify(before), after: JSON.stringify(backing.rules()) }];
+  return { out: "applied", inverse, changes: { rows: [], cells: [], table } };
+}
+
 function writeSetWithStructure(backing, action, { derive, formulas }) {
   const kept = action.cells.map((entry) => backing.rowIndex(entry[0]) >= 0 && backing.colIndex(entry[1]) >= 0);
   const rows = action.rows ?? [];
@@ -1635,6 +1724,7 @@ function writeAction(backing, action, options) {
   if (action.t === "merge") return writeMerge(backing, action);
   if (action.t === "unmerge") return writeUnmerge(backing, action);
   if (action.t === "freeze") return writeFreeze(backing, action);
+  if (action.t === "rules") return writeRules(backing, action);
   if (action.t === "set" && ((action.rows ?? []).length > 0 || (action.cols ?? []).length > 0)) {
     return writeSetWithStructure(backing, action, options);
   }

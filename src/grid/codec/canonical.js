@@ -4,8 +4,10 @@
 //
 // An adapter hides the tree library:
 //   { name(node) -> lowercase tag name, attr(node, name) -> string | null,
-//     children(node) -> element children, text(node) -> text content }
+//     children(node) -> element children (a template's are its content's),
+//     text(node) -> text content }
 
+import { RULE_FIELDS, ruleProblem } from "./rules.js";
 import { tableHtml } from "./write.js";
 
 const MAX_COUNT = 9999999;
@@ -13,7 +15,7 @@ const MAX_COUNT = 9999999;
 export const domAdapter = {
   name: (node) => node.localName,
   attr: (node, name) => node.getAttribute(name),
-  children: (node) => Array.from(node.children),
+  children: (node) => Array.from(node.localName === "template" ? node.content.children : node.children),
   text: (node) => node.textContent,
 };
 
@@ -74,6 +76,34 @@ function colModel(adapter, node) {
   return col;
 }
 
+// A rule as a parser read it, or null when it is not one the writer would write: a hand-edited
+// rule that is not whole is left out, as the tree route leaves out what it cannot read.
+function ruleModel(adapter, node) {
+  const rule = {};
+  for (const key of ["id", "pos", "kind", "range"]) {
+    const value = adapter.attr(node, key === "id" || key === "pos" ? `data-${key}` : key);
+    if (value !== null) rule[key] = cleanText(value);
+  }
+  for (const field of RULE_FIELDS) {
+    if (field === "open") {
+      if (has(adapter, node, "open")) rule.open = true;
+      continue;
+    }
+    const value = adapter.attr(node, field);
+    if (value === null) continue;
+    if (field !== "items") {
+      rule[field] = cleanText(value);
+      continue;
+    }
+    try {
+      rule.items = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return ruleProblem(rule) === null ? rule : null;
+}
+
 // The model of a parsed table, as GRAMMAR.md's model.
 export function treeModel(adapter, table) {
   const sheet = { cols: [], rows: [] };
@@ -93,6 +123,11 @@ export function treeModel(adapter, table) {
       for (const tr of adapter.children(part)) if (adapter.name(tr) === "tr") into.push(rowModel(adapter, tr, name === "thead"));
     } else if (name === "tr") {
       data.push(rowModel(adapter, part, false));
+    } else if (name === "template" && has(adapter, part, "rules")) {
+      for (const node of adapter.children(part)) {
+        const rule = adapter.name(node) === "rule" ? ruleModel(adapter, node) : null;
+        if (rule !== null) (sheet.rules ??= []).push(rule);
+      }
     }
   }
   sheet.rows = [...frozen, ...data];

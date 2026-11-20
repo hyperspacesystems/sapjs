@@ -1,6 +1,8 @@
 // The canonical writer: the only bytes the strict reader (scan.js) accepts.
 // GRAMMAR.md is the contract; change the two together or not at all.
 
+import { RULE_FIELDS, ruleProblem } from "./rules.js";
+
 const FORBIDDEN = /[\r\0]/;
 const MAX_COUNT = 9999999;
 const EMPTY_CELL = "<td></td>";
@@ -59,6 +61,20 @@ export function colHtml(col) {
   return `<col${attrs}>`;
 }
 
+export function ruleHtml(rule) {
+  const problem = ruleProblem(rule);
+  if (problem !== null) throw new TypeError(`grid codec: ${problem}`);
+  let attrs = attr("data-id", rule.id) + attr("data-pos", rule.pos) + attr("kind", rule.kind) + attr("range", rule.range);
+  for (const field of RULE_FIELDS) {
+    if (rule[field] === undefined) continue;
+    attrs += field === "open" ? " open" : attr(field, field === "items" ? JSON.stringify(rule.items) : rule[field]);
+  }
+  return `<rule${attrs}></rule>`;
+}
+
+// A table's rules, after its last row group. A table with no rules has no block.
+export const rulesHtml = (rules) => (rules?.length ? `<template rules>\n${rules.map(ruleHtml).join("\n")}\n</template>` : "");
+
 // The index at which each tbody starts among these data rows: every `groupSize` rows, except that
 // a group never ends inside a merge down a column. A group runs on until every merge open at its
 // cut has ended, since a browser draws no cell across two row groups.
@@ -100,5 +116,5 @@ export function tableHtml(sheet, { groupSize = 50 } = {}) {
   const { head, data, starts } = tableParts(sheet, { groupSize });
   let html = head;
   for (let g = 0; g < starts.length; g++) html += groupHtml(data.slice(starts[g], starts[g + 1] ?? data.length));
-  return `${html}</table>`;
+  return `${html}${rulesHtml(sheet.rules)}</table>`;
 }

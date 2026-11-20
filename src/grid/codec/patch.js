@@ -56,6 +56,7 @@ function readGrid(src) {
     col: (col) => grid.cols.push(col),
     row: (row, start, end) => grid.rows.push({ row, start, end }),
     group: (start, end, frozen) => grid.groups.push({ start, end, frozen, rows: 0 }),
+    rules: (start) => { grid.rulesAt = start; },
   });
   grid.startEnd = src.indexOf(">") + 1;
   let row = 0;
@@ -148,16 +149,18 @@ export function patchGrid(src, ops, { newId = randomId } = {}) {
   edits.push({ start: 0, end: grid.startEnd, bytes: `<table grid${freezeCols ? ` freeze-cols="${freezeCols}"` : ""}${stale ? " stale" : ""}>` });
   for (const [index, row] of edited) edits.push({ start: grid.rows[index].start, end: grid.rows[index].end, bytes: rowHtml(row) });
 
+  const tail = grid.rulesAt ?? grid.end - "</table>".length;
+
   if (appended.length > 0) {
     const last = grid.groups[grid.groups.length - 1];
     let room = last && !last.frozen ? GROUP_SIZE - last.rows : 0;
-    let at = last && !last.frozen ? last.end - "</tbody>".length : grid.end - "</table>".length;
+    let at = last && !last.frozen ? last.end - "</tbody>".length : tail;
     let rest = appended;
     if (room > 0) {
       edits.push({ start: at, end: at, bytes: rest.slice(0, room).map((row) => `${rowHtml(row)}\n`).join("") });
       rest = rest.slice(room);
     }
-    at = grid.end - "</table>".length;
+    at = tail;
     let bytes = "";
     for (let i = 0; i < rest.length; i += GROUP_SIZE) {
       bytes += `<tbody>\n${rest.slice(i, i + GROUP_SIZE).map((row) => `${rowHtml(row)}\n`).join("")}</tbody>`;

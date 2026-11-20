@@ -2,6 +2,7 @@ import { FIXTURES } from "./support/fixtures.js";
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { patchGrid } from "../../src/grid/codec/patch.js";
 import { gridModel, QueryRefused } from "../../src/grid/codec/read.js";
+import { scanAt } from "./support/scan-helpers.js";
 
 const tinySrc = () => tableHtml(FIXTURES.tiny().sheets[0]);
 const ids = () => { let n = 0; return () => `new${n++}`; };
@@ -207,3 +208,14 @@ for (const [name, sheet, ops, stale] of STALE_CASES) {
     expect(tableHtml(gridModel(result.bytes, 0))).toBe(result.bytes);
   });
 }
+
+test("appending rows past a group keeps the rules block at the table's end", () => {
+  const sheet = FIXTURES.rules().sheets[0];
+  const src = tableHtml(sheet);
+  const appends = Array.from({ length: 60 }, (_, i) => [i + 1]);
+  const { bytes } = patchGrid(src, [{ append: appends }], { newId: ids() });
+  const scan = scanAt(bytes, 0);
+  expect(scan.verdict).toBe("accept");
+  expect(scan.rules.map(({ rule }) => rule)).toEqual(sheet.rules);
+  expect(bytes.endsWith("</template></table>")).toBe(true);
+});

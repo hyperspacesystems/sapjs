@@ -508,3 +508,120 @@ test("a whole-width sort that pushes a formula above row 1 gives it back whole o
   expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
   expect(unstaled(bytes(wb))).toBe(unstaled(before));
 });
+
+const ruled = (rules, rows = 40, cols = 3) => {
+  const sheet = sheetOf("s1", rows, cols);
+  sheet.rules = rules;
+  return sheet;
+};
+const rulesOf = (wb, id = "s1") => tabOf(wb, id).backing.rules();
+
+test("a row inserted above a dropdown moves its range, and the undo moves it back", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "2", 1, { newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("C3:C41");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("C2:C40");
+});
+
+test("deleting a conditional format's top row keeps its formula on the new top row", () => {
+  const rule = { id: "w", pos: "V", kind: "when", range: "A2:D10", test: "formula", f: '=$D2="Late"', style: "background-color:#fde2e1" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "2:2"));
+  expect(out.out).toBe("applied");
+  expect([rulesOf(wb)[0].range, rulesOf(wb)[0].f]).toEqual(["A2:D9", '=$D2="Late"']);
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect([rulesOf(wb)[0].range, rulesOf(wb)[0].f]).toEqual(["A2:D10", '=$D2="Late"']);
+});
+
+test("deleting every row of a rule removes it, and the undo brings it back", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "C3:C4", items: ["Open", "Done"] };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "3:4"));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)).toEqual([]);
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)).toEqual([rule]);
+});
+
+test("renaming the tab a dropdown's source names renames the source, and the undo names it back", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "C2:C40", source: "Lists!A1:A9" };
+  const wb = modelWorkbook([
+    { id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) },
+    { id: "s2", name: "Lists", pos: "B", sheet: sheetOf("s2", 9, 1) },
+  ]);
+  const out = applyWorkbook(wb, { v: 1, t: "renameSheet", sheet: "s2", name: "Picks" });
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].source).toBe("Picks!A1:A9");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].source).toBe("Lists!A1:A9");
+});
+
+test("an undo leaves a rule a coworker changed since", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "2", 1, { newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("C3:C41");
+  const coworker = { ...rule, range: "C3:C41", open: true };
+  expect(applyWorkbook(wb, { v: 1, t: "rules", sheet: "s1", set: [coworker], remove: [] }).out).toBe("applied");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect([rulesOf(wb)[0].range, rulesOf(wb)[0].open]).toEqual(["C2:C40", true]);
+});
+
+test("a sort leaves rule ranges where they are", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "B2:B4", items: ["Open", "Done"] };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const [r2, r3, r4] = tabOf(wb, "s1").backing.rows().slice(1, 4).map((row) => row.id);
+  const rows = [r3, r2, r4];
+  const out = applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows, cols: null });
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("B2:B4");
+});
+
+test("deleting the top row of an open-ended checkbox column and undoing gives the row its checkbox back", () => {
+  const rule = { id: "k", pos: "V", kind: "check", range: "C2:C" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "2:2"));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb).map((one) => one.range)).toEqual(["C2:C"]);
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb).map((one) => one.range)).toEqual(["C2:C"]);
+});
+
+test("undoing a paste that grew the sheet gives a rule past the edge its old rows", () => {
+  const rule = { id: "k", pos: "V", kind: "check", range: "B2:B40" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule], 10) }]);
+  const out = applyWorkbook(wb, buildSet(tabOf(wb, "s1").backing, "A44", 44, { grow: true, newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(wb.sheets()[0].backing.rows()).toHaveLength(44);
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb).map((one) => one.range)).toEqual(["B2:B40"]);
+});
+
+test("moving a row inside a rule's range leaves the range where it is", () => {
+  const rule = { id: "k", pos: "V", kind: "check", range: "C2:C40" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const out = applyWorkbook(wb, buildMoveRows(tabOf(wb, "s1").backing, "40:40", "1"));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb).map((one) => one.range)).toEqual(["C2:C40"]);
+});
+
+test("a conditional format comparing each row with the row above keeps working when rows come and go", () => {
+  const rule = { id: "w", pos: "V", kind: "when", range: "A2:D40", test: "formula", f: "=$A2<>$A1", style: "background-color:#fde2e1" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule], 40, 4) }]);
+  const removed = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "2:2"));
+  expect(removed.out).toBe("applied");
+  expect([rulesOf(wb)[0].range, rulesOf(wb)[0].f]).toEqual(["A2:D39", "=$A2<>$A1"]);
+  const inserted = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "2", 1, { newId: mint() }));
+  expect(inserted.out).toBe("applied");
+  expect([rulesOf(wb)[0].range, rulesOf(wb)[0].f]).toEqual(["A3:D40", "=$A3<>$A2"]);
+
+  const late = { id: "l", pos: "W", kind: "when", range: "A:D", test: "formula", f: '=$D1="Late"', style: "background-color:#fde2e1" };
+  const other = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([late], 40, 4) }]);
+  const above = applyWorkbook(other, buildInsertRows(tabOf(other, "s1").backing, "1", 1, { newId: mint() }));
+  expect(above.out).toBe("applied");
+  expect(rulesOf(other)[0].f).toBe('=$D1="Late"');
+});

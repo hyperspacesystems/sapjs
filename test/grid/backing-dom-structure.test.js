@@ -891,3 +891,40 @@ test.each(Array.from({ length: PARTS }, (unused, part) => [part + 1]))(`lists of
   expect(counts.records.edit).toBeGreaterThan(1000);
   expect(counts.records.none).toBeGreaterThan(100);
 });
+
+test("a row insert keeps the rules block last and every rule", () => {
+  const src = readFileSync(join(GOLDEN, "rules.html"), "utf8");
+  const tail = src.slice(src.indexOf("<template rules>"));
+  document.body.innerHTML = src;
+  const page = watch(document.body.firstElementChild);
+  page.backing.insertRow(page.backing.rows().length, { id: "last", pos: "zz" });
+  expect(page.backing.bytes().endsWith(tail)).toBe(true);
+  expect(page.table.lastElementChild.localName).toBe("template");
+});
+
+test("a hand-edited table with its rules block before the rows gets it back last", () => {
+  const src = readFileSync(join(GOLDEN, "rules.html"), "utf8");
+  const start = src.indexOf("<template rules>");
+  const block = src.slice(start, src.indexOf("</template>") + "</template>".length);
+  document.body.innerHTML = `${src.slice(0, start)}</table>`.replace("<tbody>", `${block}<tbody>`);
+  const page = watch(document.body.firstElementChild);
+  page.backing.insertRow(page.backing.rows().length, { id: "last", pos: "zz" });
+  const bytes = page.backing.bytes();
+  expect(bytes.endsWith(`${block}</table>`)).toBe(true);
+  expect(page.table.lastElementChild.localName).toBe("template");
+});
+
+test("setRules writes the rules block a reader reads back", () => {
+  const start = longSheet(3);
+  document.body.innerHTML = tableHtml(start);
+  const page = watch(document.body.firstElementChild);
+  const rules = [
+    { id: "a", pos: "G", kind: "check", range: "A1:A9" },
+    { id: "b", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] },
+  ];
+  page.backing.setRules(rules);
+  expect(page.backing.bytes()).toBe(tableHtml({ ...start, rules }));
+  expect(domBacking(page.table).rules()).toEqual(rules);
+  page.backing.setRules([]);
+  expect(Array.from(page.table.children).some((part) => part.localName === "template")).toBe(false);
+});

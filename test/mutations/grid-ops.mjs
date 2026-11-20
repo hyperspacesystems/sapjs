@@ -3,6 +3,8 @@
 //   |a1-base26|model-trailing|model-index
 //   |ops-refuse-late|ops-inverse-fmt|ops-inverse-new|ops-covered|ops-batch-atomic|ops-empty-cell|ops-validate-cr|ops-formula-stale
 //   |ops-stale-unknown|ops-stale-batch-member|ops-stale-auto
+//   |rules-inverse-set|rules-validate|rules-dom-content|rules-rewrite|rules-reanchor|rules-inverse-list|rules-restore-guard|rules-anchored-abs|rules-room-revert
+//   |rules-rebound|rules-moves-stay|rules-room-refusal|rules-standalone|rules-page-undo
 //   |rows-tie|rows-exists|rows-inverse-cells|rows-frozen|rows-bad-key|rows-end|rows-formula-guard
 //   |cols-shift|cols-rederive|cols-own-fmt|cols-inverse-cells
 //   |merge-inverse-content|merge-grow|merge-anchor|merge-overlap|merge-cut|freeze-cut|ops-flat-inverse
@@ -498,7 +500,7 @@ export const MUTATIONS = {
   "fix-guard-survivors": {
     what: "the guard counts every formula in the table",
     file: OPS,
-    find: "  return holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols);",
+    find: "  return backing.hasFormula() && (holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols));",
     replace: "  return backing.hasFormula();",
     test: ROWS_TEST,
     name: "formula guard",
@@ -507,7 +509,7 @@ export const MUTATIONS = {
   "fix-guard-after": {
     what: "the guard looks only at formulas that are there before the action",
     file: OPS,
-    find: "  return holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols);",
+    find: "  return backing.hasFormula() && (holdsFormula(backing, rows, cols) || holdsFormula(after, rows, cols));",
     replace: "  return holdsFormula(backing, rows, cols);",
     test: MERGE_TEST,
     name: "refusals",
@@ -986,8 +988,8 @@ export const MUTATIONS = {
   "speed-guard-copy": speed(
     "the formula guard writes the action on a copy of a sheet that has no formula",
     OPS,
-    "  if (!backing.hasFormula()) return false;\n",
-    "",
+    "  if (!ruled && !backing.hasFormula()) return false;\n",
+    "  if (!ruled) return false;\n",
     COPIES,
   ),
   "speed-delete-replay": speed(
@@ -1091,8 +1093,8 @@ export const MUTATIONS = {
   ),
   "speed-guard-formula": rows(
     "the formula guard is skipped on a sheet that has a formula",
-    "  if (!backing.hasFormula()) return false;",
-    "  if (backing.hasFormula()) return false;",
+    "  if (!ruled && !backing.hasFormula()) return false;",
+    "  if (!ruled && backing.hasFormula()) return false;",
     "formula guard",
   ),
   "speed-delete-merge": speed(
@@ -1207,6 +1209,132 @@ export const MUTATIONS = {
     "box.anchorAt = box.anchorAt > at",
     DELETED,
   ),
+  "rules-inverse-set": {
+    what: "a rules action's inverse forgets a rule it replaced or removed",
+    file: "src/grid/ops.js",
+    find: "    if (old !== undefined) inverse.set.push(old);",
+    replace: "    if (old !== undefined) void old;",
+    test: "test/grid/ops-merge.test.js",
+    name: "a rules action adds, replaces and removes rules, and its inverse puts them back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-validate": {
+    what: "a rules action is never checked, so a rule naming another tab or a bad formula is written",
+    file: "src/grid/ops.js",
+    find: "  if (action.t === \"rules\") return checkRules(action);",
+    replace: "  if (action.t === \"rules\") return;",
+    test: "test/grid/ops-merge.test.js",
+    name: "a rules action is refused when its range names another tab, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-dom-content": {
+    what: "the DOM backing writes rules as the template's text, which a reader never sees",
+    file: "src/grid/backing-dom.js",
+    find: "    block.innerHTML = `\\n${rules.map(ruleHtml).join(\"\\n\")}\\n`;",
+    replace: "    block.textContent = `\\n${rules.map(ruleHtml).join(\"\\n\")}\\n`;",
+    test: "test/grid/backing-dom-structure.test.js",
+    name: "setRules writes the rules block a reader reads back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-rewrite": {
+    what: "rules stay where they were after rows go in above them",
+    file: "src/grid/workbook.js",
+    find: "  const rebound = before === null ? new Set() : rewriteRules(run, before, frameOf(run.wb), TAB.has(action.t));",
+    replace: "  const rebound = new Set();",
+    test: "test/grid/workbook.test.js",
+    name: "a row inserted above a dropdown moves its range, and the undo moves it back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-reanchor": {
+    what: "a conditional format's formula is not moved to the range's new top row, so it becomes #REF!",
+    file: "src/grid/workbook.js",
+    find: "    out.f = tabStep ? moveFormula(rule.f, sid, before, after) : moveAnchored(rule.f, sid, before, after, now.row - was.row, now.col - was.col);",
+    replace: "      out.f = moveFormula(rule.f, sid, before, after);",
+    test: "test/grid/workbook.test.js",
+    name: "a conditional format comparing each row with the row above keeps working when rows come and go",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-inverse-list": {
+    what: "the inverse of a step carries no rules list, so a rule a delete removed never comes back",
+    file: "src/grid/workbook.js",
+    find: "  if (changes.length > 0) inverse.rules = changes;",
+    replace: "",
+    test: "test/grid/workbook.test.js",
+    name: "deleting every row of a rule removes it, and the undo brings it back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-restore-guard": {
+    what: "an undo puts back a rule a coworker changed since",
+    file: "src/grid/workbook.js",
+    find: "    if (sameRule(rulesBefore.get(ruleKey(sheet, id))?.rule, left)) restoreRule(run, sheet, id, back);",
+    replace: "    restoreRule(run, sheet, id, back);",
+    test: "test/grid/workbook.test.js",
+    name: "an undo leaves a rule a coworker changed since",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-anchored-abs": {
+    what: "moveAnchored moves the row of a $ part with the corner",
+    file: "src/grid/formula/text.js",
+    find: "        const r = hasRow ? (token.absRow ? place(was.rows, now.rowAt, token.row - 1) : token.row - 1 + rows) : 0;",
+    replace: "        const r = hasRow ? token.row - 1 + rows : 0;",
+    test: "test/grid/formula/text.test.js",
+    name: "moveAnchored moves relative parts with the corner and keeps $ parts on their rows",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-rebound": {
+    what: "the inverse forgets a rule whose reference rebound, so the row it moved off keeps it",
+    file: "src/grid/workbook.js",
+    find: "    if (sameRule(was?.rule, now?.rule) && !rebound.has(key)) continue;",
+    replace: "    if (sameRule(was?.rule, now?.rule)) continue;",
+    test: "test/grid/workbook.test.js",
+    name: "deleting the top row of an open-ended checkbox column and undoing gives the row its checkbox back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-moves-stay": {
+    what: "a row move drags a rule's range with the row, so the range follows the drag",
+    file: "src/grid/workbook.js",
+    find: "  const ruleFrame = rulesBefore !== null && (TAB.has(action.t) || resizes(action)) ? frameOf(wb) : null;",
+    replace: "  const ruleFrame = rulesBefore !== null && (TAB.has(action.t) || structural(action)) ? frameOf(wb) : null;",
+    test: "test/grid/workbook.test.js",
+    name: "moving a row inside a rule's range leaves the range where it is",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-room-refusal": {
+    what: "a room accepts a rule restore whose rule no rules action could write",
+    file: "src/grid/room-codec.js",
+    find: "rule.id === entry[1] && ruleRefusal(rule) === null",
+    replace: "rule.id === entry[1]",
+    test: "test/grid-room/codec.test.js",
+    name: "a room refuses an undo whose rule restore holds a rule no rules action could write",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-standalone": {
+    what: "a grid with rules and no engine writes a row insert under its rules",
+    file: "src/grid/ops.js",
+    find: "  const ruled = backing.rules().length > 0;",
+    replace: "  const ruled = false;",
+    test: "test/grid/grid-structure.test.js",
+    name: "a grid with rules and no formula engine refuses a row insert above its rules",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-page-undo": {
+    what: "the DOM backing never reads a rules block the page put back",
+    file: "src/grid/backing-dom.js",
+    find: " || (part.localName === \"template\" && part.hasAttribute(\"rules\"))",
+    replace: "",
+    test: "test/grid/grid-structure.test.js",
+    name: "a rules block the page put back is read before the next rules write",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-room-revert": {
+    what: "a room refuses an undo whose step carries rule restores",
+    file: "src/grid/room-codec.js",
+    find: "key !== \"action\" && key !== \"restore\" && key !== \"rules\")",
+    replace: "key !== \"action\" && key !== \"restore\")",
+    test: "test/grid-room/codec.test.js",
+    name: "undoing a row insert on a tab with rules is accepted in a room",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) mutate(MUTATIONS);

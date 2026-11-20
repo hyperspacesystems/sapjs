@@ -76,3 +76,11 @@ for (const [name, input, expected] of HAND) {
     expect(scanGrid(expected, 0)).toBe(expected.length);
   });
 }
+
+test("a parsed table keeps its rules, and a rule a hand edit broke is left out", () => {
+  const sheet = FIXTURES.rules().sheets[0];
+  const src = tableHtml(sheet).replace("</template>", '<rule data-id="bad" data-pos="z" kind="check" range="A1:A9" style="color:red"></rule>\n</template>');
+  const once = parse(src).querySelector("table");
+  const table = parse(once.outerHTML).querySelector("table");
+  expect(canonicalGrid(domAdapter, table)).toBe(tableHtml(sheet));
+});

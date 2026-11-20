@@ -1,4 +1,4 @@
-import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, parse, print, restoreSlots, slotsOf, standard, tokenize } from "../../../src/grid/formula/text.js";
+import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, moveAnchored, originalSlots, parse, print, restoreSlots, slotsOf, standard, tokenize } from "../../../src/grid/formula/text.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
 
@@ -127,4 +127,13 @@ test("the standard spelling capitalizes names and prints references from the tab
   expect(standard("=budget!b2*2", "s2", book)).toBe("=Budget!B2*2");
   expect(standard("=if(true, a2:a, false)", "s1", book)).toBe("=IF(TRUE, A2:A, FALSE)");
   expect(standard("=sum(", "s1", book)).toBe("=sum(");
+});
+
+test("moveAnchored moves relative parts with the corner and keeps $ parts on their rows", () => {
+  const before = frame(tab("s1", "Budget", rowsOf("s1", 5), colsOf("s1", 3)));
+  const after = frame(tab("s1", "Budget", rowsOf("s1", 5).filter((id) => id !== "s1r2"), colsOf("s1", 3)));
+  expect(moveAnchored("=$A2<>$A1", "s1", before, after, 0, 0)).toBe("=$A2<>$A1");
+  expect(moveAnchored("=B$2+B3", "s1", before, after, 0, 0)).toBe("=#REF!+B3");
+  expect(moveAnchored("=B3", "s1", before, after, 1, 1)).toBe("=C4");
+  expect(moveAnchored("=A1", "s1", before, after, -1, 0)).toBe("=#REF!");
 });

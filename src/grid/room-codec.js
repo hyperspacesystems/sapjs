@@ -17,7 +17,7 @@
 
 import { applyWorkbook, frameOf, tabProblem } from "./workbook.js";
 import { byPos, modelWorkbook } from "./workbook-backing.js";
-import { boxesApart, clearedBetween, cutsFrozen, mergeBoxes, needs as needsOf, creates as createsOf, orderedCols, orderedRows, targets as targetsOf, validate as validateOne } from "./ops.js";
+import { boxesApart, clearedBetween, cutsFrozen, mergeBoxes, needs as needsOf, creates as createsOf, orderedCols, orderedRows, ruleRefusal, targets as targetsOf, validate as validateOne } from "./ops.js";
 import { scanGrid } from "./codec/scan.js";
 import { createSheetWriter } from "./codec/cached-writer.js";
 import { fnv1a, hex } from "./codec/digest.js";
@@ -239,7 +239,7 @@ function read(bytes) {
       at = space(src, close + 5);
       const sheet = { cols: [], rows: [] };
       try {
-        at = scanGrid(src, at, { table: (table) => Object.assign(sheet, table), col: (col) => sheet.cols.push(col), row: (row) => sheet.rows.push(row) });
+        at = scanGrid(src, at, { table: (table) => Object.assign(sheet, table), col: (col) => sheet.cols.push(col), row: (row) => sheet.rows.push(row), rule: (rule) => (sheet.rules ??= []).push(rule) });
       } catch (error) {
         throw new Error(`sheet codec: tab ${JSON.stringify(id)}: ${error.message}`);
       }
@@ -374,6 +374,12 @@ function validRestore(entry) {
   return typeof guard === "object" && Object.keys(guard).length === 1 && isIds(guard.ids) && isIds(refs);
 }
 
+// A rule restore entry, as `settleRules` writes it (workbook.js): [sheet, id, back, left], each of
+// back and left null or a whole rule with that id that a rules action could write.
+const validRuleRestore = (entry) =>
+  Array.isArray(entry) && entry.length === 4 && text(entry[0]) && text(entry[1]) &&
+  entry.slice(2).every((rule) => rule === null || (rule !== null && typeof rule === "object" && rule.id === entry[1] && ruleRefusal(rule) === null));
+
 const isWrote = (entry) => {
   if (!Array.isArray(entry) || entry.length !== 5 || !text(entry[0]) || !text(entry[4])) return false;
   const [, r, c, kind] = entry;
@@ -390,14 +396,17 @@ function validRevert(action) {
   if (!Array.isArray(action.wrote) || !action.wrote.every(isWrote)) return false;
   if (action.step === null) return action.wrote.length === 0;
   const { step } = action;
-  if (!step || typeof step !== "object" || Object.keys(step).some((key) => key !== "action" && key !== "restore")) return false;
+  if (!step || typeof step !== "object" || Object.keys(step).some((key) => key !== "action" && key !== "restore" && key !== "rules")) return false;
   if (!Array.isArray(step.restore) || !step.restore.every(validRestore)) return false;
+  if (step.rules !== undefined && !(Array.isArray(step.rules) && step.rules.every(validRuleRestore))) return false;
   return step.action?.t !== "revert" && validate(step.action);
 }
 
 function validate(action) {
   if (!action || typeof action !== "object" || Array.isArray(action) || action.v !== 1) return false;
   try {
+    // A rules action travels in a room once the room codec knows its targets (S8c).
+    if (action.t === "rules") return false;
     if (action.t === "revert") return validRevert(action);
     if (action.t === "sort") return validSort(action);
     if (TAB_KINDS.has(action.t)) return Object.keys(action).every((key) => TAB_FIELDS[action.t].includes(key)) && tabProblem(action) === null;
@@ -880,7 +889,7 @@ function applyRevert(doc, action) {
     const gone = new Set([...skipped, ...dropped, ...one.lost]);
     const restore = action.step.restore.filter(([s, r, c]) => !gone.has(cellId(s, r, c)));
     const wb = workbookOf(doc);
-    const out = applyWorkbook(wb, { action: one.step, restore }, {});
+    const out = applyWorkbook(wb, { action: one.step, restore, rules: action.step.rules ?? [] }, {});
     if (out.out !== "applied") {
       refused = out;
       continue;

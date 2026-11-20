@@ -1,0 +1,14 @@
+<table grid><colgroup><col data-id="k-c0" data-pos="G"><col data-id="k-c1" data-pos="V"><col data-id="k-c2" data-pos="l"></colgroup>
+<thead>
+<tr data-id="k-r1" data-pos="8"><td>Done</td><td>Status</td><td>Value</td></tr>
+</thead><tbody>
+<tr data-id="k-r2" data-pos="G"><td>TRUE</td><td>Open</td><td n>3</td></tr>
+<tr data-id="k-r3" data-pos="V"><td>FALSE</td><td>Done</td><td n>5</td></tr>
+<tr data-id="k-r4" data-pos="l"><td></td><td>Open</td><td n>8</td></tr>
+</tbody><template rules>
+<rule data-id="k1" data-pos="8" kind="check" range="A2:A"></rule>
+<rule data-id="k2" data-pos="G" kind="list" range="B2:B4" items="[&quot;Open&quot;,&quot;Done&quot;,&quot;Say \&quot;hi\&quot; &amp; <go>&quot;]" open></rule>
+<rule data-id="k3" data-pos="V" kind="list" range="C2:C4" source="'Other tab'!A1:A9"></rule>
+<rule data-id="k4" data-pos="d" kind="when" range="B2:C4" test="formula" f="=$B2=&quot;Done&quot;" style="font-weight:bold;background-color:#fde2e1"></rule>
+<rule data-id="k5" data-pos="l" kind="scale" range="C2:C4" low="#f6f7f9" mid="#ffd666" high="#57bb8a"></rule>
+</template></table>

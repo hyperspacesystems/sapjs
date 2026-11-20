@@ -2,6 +2,8 @@
 // which is exactly what write.js emits. Anything else is a CodecMiss, and the
 // caller reads that table with a real HTML parser instead.
 
+import { RULE_FIELDS, ruleProblem } from "./rules.js";
+
 export class CodecMiss extends Error {
   constructor(message) {
     super(message);
@@ -156,9 +158,48 @@ function readGroup(src, i, frozen, sink, index) {
   return index;
 }
 
+function readRule(src, i) {
+  const start = i;
+  i = expect(src, i, '<rule data-id="');
+  const rule = { id: readAval(src, i) };
+  rule.pos = readAval(src, expect(src, cursor, ' data-pos="'));
+  rule.kind = readAval(src, expect(src, cursor, ' kind="'));
+  rule.range = readAval(src, expect(src, cursor, ' range="'));
+  i = cursor;
+  for (const field of RULE_FIELDS) {
+    if (field === "open") {
+      if (flag(src, i, " open")) {
+        rule.open = true;
+        i += 5;
+      }
+      continue;
+    }
+    if (!src.startsWith(` ${field}="`, i)) continue;
+    const raw = readAval(src, i + field.length + 3);
+    i = cursor;
+    if (field !== "items") {
+      rule[field] = raw;
+      continue;
+    }
+    let items = null;
+    try {
+      items = JSON.parse(raw);
+    } catch {
+      miss("rule items that are not JSON", start);
+    }
+    if (!Array.isArray(items) || JSON.stringify(items) !== raw) miss("rule items that are not a list written as the writer writes it", start);
+    rule.items = items;
+  }
+  const problem = ruleProblem(rule);
+  if (problem !== null) miss(problem, start);
+  cursor = expect(src, i, "></rule>");
+  return rule;
+}
+
 // Reads the grid that starts at `at` and returns the index just past "</table>".
 // The sink is told about the table, each col, each row (with its cells and its
-// byte range) and each row group. Throws CodecMiss when the region does not fit.
+// byte range), each row group, each rule (with its byte range) and the rules
+// block's byte range. Throws CodecMiss when the region does not fit.
 export function scanGrid(src, at, sink = NO_SINK) {
   let i = expect(src, at, "<table grid");
   const table = {};
@@ -194,6 +235,24 @@ export function scanGrid(src, at, sink = NO_SINK) {
   while (src.startsWith("<tbody>", i)) {
     index = readGroup(src, i, false, sink, index);
     i = skipSpace(src, cursor);
+  }
+  if (src.startsWith("<template rules>", i)) {
+    const start = i;
+    i += 16;
+    let count = 0;
+    for (;;) {
+      i = skipSpace(src, i);
+      if (src.startsWith("</template>", i)) break;
+      const ruleStart = i;
+      const rule = readRule(src, i);
+      i = cursor;
+      sink.rule?.(rule, ruleStart, i);
+      count += 1;
+    }
+    if (count === 0) miss("an empty rules block", start);
+    i += 11;
+    sink.rules?.(start, i);
+    i = skipSpace(src, i);
   }
   return expect(src, i, "</table>");
 }

@@ -22,7 +22,7 @@
 
 import { modelBacking } from "./backing-model.js";
 import { canonicalGrid, domAdapter, treeModel } from "./codec/canonical.js";
-import { groupStarts } from "./codec/write.js";
+import { groupStarts, ruleHtml } from "./codec/write.js";
 import { contentOf, effectiveFmt } from "./content.js";
 import { fmtKind } from "./format.js";
 
@@ -139,17 +139,20 @@ function colElement(doc, col) {
 
 // The table's parts as the tree reader walks them. The rows are in its order: the rows of every
 // thead, then every other row. `plain` says the parts are the ones the writer writes: a colgroup
-// first, with every column in it, then at most one thead, then one tbody or more, and no row
-// anywhere else.
+// first, with every column in it, then at most one thead, then one tbody or more, then at most
+// the rules block, and no row anywhere else.
 function layout(table) {
   const frozen = [];
   const data = [];
   const cols = [];
   const bodies = [];
   let thead = null;
+  let rules = null;
   let plain = table.firstElementChild?.localName === "colgroup";
   for (let part = table.firstElementChild; part !== null; part = part.nextElementSibling) {
     const name = part.localName;
+    if (rules !== null && (name === "colgroup" || name === "col" || name === "tr" || name === "thead" || name === "tbody" || name === "tfoot")) plain = false;
+    if (name === "template" && part.hasAttribute("rules")) rules = part;
     if (name === "col") cols.push(part);
     if (name === "colgroup") for (let col = part.firstElementChild; col !== null; col = col.nextElementSibling) if (col.localName === "col") cols.push(col);
     if (name === "tr") data.push(part);
@@ -185,19 +188,21 @@ const rowsAdapter = {
 
 const readRows = (trs) => treeModel(rowsAdapter, trs).rows;
 
-// The tree reader over the table without its rows: the columns, the count of frozen columns and
-// the stale mark, as the mirror was read.
+// The tree reader over the table without its rows: the columns, the count of frozen columns, the
+// stale mark and the rules, as the mirror was read.
 const headAdapter = {
   ...domAdapter,
   children: (node) => {
     const parts = domAdapter.children(node);
-    return node.localName === "table" ? parts.filter((part) => part.localName === "colgroup" || part.localName === "col") : parts;
+    return node.localName === "table" ? parts.filter((part) => part.localName === "colgroup" || part.localName === "col" || (part.localName === "template" && part.hasAttribute("rules"))) : parts;
   },
 };
 
+const sameRules = (now, kept) => JSON.stringify(now.rules ?? []) === JSON.stringify(kept.rules ?? []);
+
 function sameHead(now, kept) {
   if (now.freezeCols !== kept.freezeCols || Boolean(now.stale) !== Boolean(kept.stale) || now.cols.length !== kept.cols.length) return false;
-  return now.cols.every((col, c) => COL_FIELDS.every((key) => col[key] === kept.cols[c][key]));
+  return now.cols.every((col, c) => COL_FIELDS.every((key) => col[key] === kept.cols[c][key])) && sameRules(now, kept);
 }
 
 function sameRow(now, kept) {
@@ -339,6 +344,8 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
       const ours = name === "colgroup" || name === "thead" || name === "tbody" || name === "tfoot";
       if (ours && !wanted.has(part) && part.firstElementChild === null) part.remove();
     }
+    const rules = Array.from(table.children).find((part) => part.localName === "template" && part.hasAttribute("rules"));
+    if (rules && rules.nextElementSibling !== null) table.appendChild(rules);
     take(layout(table));
   }
 
@@ -475,6 +482,24 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
       settle();
     }
     if (cols !== undefined) setAttribute(table, "freeze-cols", cols ? String(cols) : null);
+  }
+
+  // The rules block is written whole, as a new template that replaces the old one: a parser keeps a
+  // template's rules in its content, which an observer of the table does not watch, so the swap is
+  // what an observer sees.
+  function setRules(list) {
+    mirror.setRules(list);
+    const rules = mirror.rules();
+    const old = Array.from(table.children).find((part) => part.localName === "template" && part.hasAttribute("rules")) ?? null;
+    if (rules.length === 0) {
+      old?.remove();
+      return;
+    }
+    const block = doc.createElement("template");
+    block.setAttribute("rules", "");
+    block.innerHTML = `\n${rules.map(ruleHtml).join("\n")}\n`;
+    if (old !== null) old.replaceWith(block);
+    else table.appendChild(block);
   }
 
   function placeCol(el, c) {
@@ -639,6 +664,8 @@ export function domBacking(table, { write = (fn) => fn(), sheetId = null } = {})
     rowIndex: (id) => mirror.rowIndex(id),
     colIndex: (id) => mirror.colIndex(id),
     frozen: () => mirror.frozen(),
+    rules: () => mirror.rules(),
+    setRules,
     hasFormula: () => mirror.hasFormula(),
     cell: (r, c) => mirror.cell(r, c),
     putCell,

@@ -10,4 +10,5 @@ export { domAdapter, treeModel, canonicalGrid } from "./canonical.js";
 export { STYLE_PROPERTIES, filterStyle, isCanonicalStyle } from "./styles.js";
 export { patchGrid } from "./patch.js";
 export { createSheetWriter } from "./cached-writer.js";
+export { ruleProblem, RULE_KINDS, RULE_FIELDS, RULE_TESTS, copyRule, byRule, sameRule } from "./rules.js";
 export { fnv1a, hex, cellInput, columnIds, rowDigest, gridDigest, tabDigest, maskHex, maskIndexes, rowChange } from "./digest.js";

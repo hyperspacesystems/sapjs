@@ -32,6 +32,7 @@ import {
   buildMerge,
   buildMoveCols,
   buildMoveRows,
+  buildRules,
   buildSetColWidth,
   buildSetRange,
   buildSetRowHeight,
@@ -39,6 +40,7 @@ import {
   spanOf,
 } from "./build.js";
 import { checkSheet } from "./check.js";
+import { copyRule } from "./codec/rules.js";
 import { QueryRefused } from "./codec/read.js";
 import { cellValue, shown, typed } from "./codec/value.js";
 import { adoptFmt, contentOf, derive, effectiveFmt, waitsForFormatter } from "./content.js";
@@ -858,6 +860,8 @@ export function createGrid(table, { write = (fn) => fn(), quiet = write, mayWrit
     merge: command((area) => buildMerge(backing, area), true),
     unmerge: command((ref) => buildUnmerge(backing, ref), true),
     freeze: command((counts) => buildFreeze(backing, counts)),
+    rules: refusing(() => backing.rules().map(copyRule)),
+    setRules: command((change) => buildRules(backing, change)),
     apply: refusing(apply),
     dispatch: null,
     repair,

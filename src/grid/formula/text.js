@@ -760,6 +760,59 @@ export function shiftRows(f, delta) {
   return "=" + out + src.slice(at);
 }
 
+// The top-left row and column (0-based) of a range as written; an open axis starts at row 1 or
+// column A.
+export function topLeftOf(range) {
+  const parsed = parse(range);
+  const node = parsed.error ? null : parsed.refs[0];
+  if (!node) return { row: 0, col: 0 };
+  const ends = node.type === "ref" ? [node] : [node.from, node.to];
+  const rows = ends.map((end) => end.row).filter((row) => typeof row === "number");
+  const cols = ends.map((end) => end.col).filter((col) => typeof col === "string");
+  return { row: rows.length > 0 ? Math.min(...rows) - 1 : 0, col: cols.length > 0 ? Math.min(...cols.map(colIndex)) : 0 };
+}
+
+// A conditional format's formula is written for its range's top-left cell. Its relative parts mean
+// "so many rows and columns from that cell", as a fill reads them, so after a step that moved the
+// corner by `rows` and `cols` they move by as much. Its `$` parts keep naming the row or column they
+// named in `before`, wherever that is in `after`, and a part whose row or column is gone, or that
+// would land before row 1 or column A, becomes #REF!. A reference to a tab no tab is named is kept.
+export function moveAnchored(f, homeId, before, after, rows, cols) {
+  const src = f.slice(1);
+  const parsed = parse(src);
+  if (parsed.error) return f;
+  const place = (ids, at, index) => (index >= ids.length ? index : at.get(ids[index]) ?? -1);
+  let out = "";
+  let at = 0;
+  for (const node of parsed.refs) {
+    const text = src.slice(node.span[0], node.span[1]);
+    const was = node.sheet === null ? before.get(homeId) : byName(before, node.sheet);
+    const now = was ? after.get(was.id) : null;
+    let moved = "";
+    let from = 0;
+    let dead = false;
+    if (was && now) {
+      for (const token of tokenize(text)) {
+        if (token.type !== "cell" && token.type !== "row" && token.type !== "col") continue;
+        const raw = text.slice(token.start, token.end);
+        const hasCol = token.type !== "row";
+        const hasRow = token.type !== "col";
+        const digits = hasRow ? /\d+$/.exec(raw)[0] : "";
+        const length = (hasCol ? (token.absCol ? 1 : 0) + token.col.length : 0) + (hasRow ? (token.absRow ? 1 : 0) + digits.length : 0);
+        const c = hasCol ? (token.absCol ? place(was.cols, now.colAt, colIndex(token.col)) : colIndex(token.col) + cols) : 0;
+        const r = hasRow ? (token.absRow ? place(was.rows, now.rowAt, token.row - 1) : token.row - 1 + rows) : 0;
+        if (c < 0 || r < 0) dead = true;
+        const coord = (hasCol ? `${token.absCol ? "$" : ""}${colText(Math.max(c, 0))}` : "") + (hasRow ? `${token.absRow ? "$" : ""}${r + 1}` : "");
+        moved += text.slice(from, token.end - length) + coord;
+        from = token.end;
+      }
+    }
+    out += src.slice(at, node.span[0]) + (dead ? "#REF!" : moved + text.slice(from));
+    at = node.span[1];
+  }
+  return "=" + out + src.slice(at);
+}
+
 // What a formula means, as one string: its text with each reference replaced by its kind (a cell or
 // a range) and the ids it binds to in `frame`, each range's corners in a fixed order, and an end past
 // the sheet's edge written as its typed row number or column letters. Two formulas mean the same

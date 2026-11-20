@@ -863,7 +863,7 @@ export const MUTATIONS = {
     find: "    if (spanned) settle();\n",
     replace: "",
     test: "test/grid/backing-dom-structure.test.js",
-    name: "lists of every action kind give the same bytes and the same tree, part 2 of 6",
+    name: "lists of every action kind give the same bytes and the same tree, part 5 of 6",
     expects: /the live table is the tree its bytes parse to/,
   },
   "grid-settled-put-back": {

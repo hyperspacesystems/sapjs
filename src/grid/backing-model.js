@@ -1,6 +1,8 @@
 // The model backing: a store over a codec sheet model (GRAMMAR.md) that works by
 // position and holds no rules. The reducer puts the rules on top.
 
+import { byRule, copyRule } from "./codec/rules.js";
+
 const trim = (cells) => {
   while (cells.length > 0 && cells[cells.length - 1] === null) cells.pop();
 };
@@ -11,6 +13,7 @@ function copySheet(sheet) {
   const copy = { ...sheet };
   copy.cols = (sheet.cols ?? []).map((col) => ({ ...col }));
   copy.rows = (sheet.rows ?? []).map((row) => ({ ...row, cells: (row.cells ?? []).map(copyCell) }));
+  if (sheet.rules) copy.rules = sheet.rules.map(copyRule);
   return copy;
 }
 
@@ -180,6 +183,16 @@ export function modelBacking(sheet, { sheetId = null } = {}) {
         if (cols) store.freezeCols = cols;
         else delete store.freezeCols;
       }
+    },
+
+    rules: () => store.rules ?? [],
+
+    // The rules are replaced whole and kept in the file's order. A stored rule is never changed in
+    // place, so a list `rules()` returned stays what it was.
+    setRules(list) {
+      const next = list.map(copyRule).sort(byRule);
+      if (next.length > 0) store.rules = next;
+      else delete store.rules;
     },
 
     setStale(flag) {

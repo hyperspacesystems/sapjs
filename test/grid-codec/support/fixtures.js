@@ -455,6 +455,35 @@ function tallMerge() {
   };
 }
 
+function rules() {
+  const colKeys = keysBetween(null, null, 3);
+  const rowKeys = keysBetween(null, null, 4);
+  const ruleKeys = keysBetween(null, null, 5);
+  return {
+    sheets: [
+      {
+        id: "k",
+        name: "Rules",
+        pos: "G",
+        cols: colKeys.map((pos, i) => ({ id: `k-c${i}`, pos })),
+        rows: [
+          { id: "k-r1", pos: rowKeys[0], frozen: true, cells: [cell("Done"), cell("Status"), cell("Value")] },
+          { id: "k-r2", pos: rowKeys[1], cells: [cell("TRUE"), cell("Open"), cell("3", { n: true })] },
+          { id: "k-r3", pos: rowKeys[2], cells: [cell("FALSE"), cell("Done"), cell("5", { n: true })] },
+          { id: "k-r4", pos: rowKeys[3], cells: [null, cell("Open"), cell("8", { n: true })] },
+        ],
+        rules: [
+          { id: "k1", pos: ruleKeys[0], kind: "check", range: "A2:A" },
+          { id: "k2", pos: ruleKeys[1], kind: "list", range: "B2:B4", items: ["Open", "Done", 'Say "hi" & <go>'], open: true },
+          { id: "k3", pos: ruleKeys[2], kind: "list", range: "C2:C4", source: "'Other tab'!A1:A9" },
+          { id: "k4", pos: ruleKeys[3], kind: "when", range: "B2:C4", test: "formula", f: '=$B2="Done"', style: "font-weight:bold;background-color:#fde2e1" },
+          { id: "k5", pos: ruleKeys[4], kind: "scale", range: "C2:C4", low: "#f6f7f9", mid: "#ffd666", high: "#57bb8a" },
+        ],
+      },
+    ],
+  };
+}
+
 function styled() {
   const colKeys = keysBetween(null, null, 3);
   const rowKeys = keysBetween(null, null, 3);
@@ -657,6 +686,7 @@ export const FIXTURES = {
   escapes,
   hidden,
   "tall-merge": tallMerge,
+  rules,
 };
 
 const attr = (name, value) => ` ${name}="${attrEscape(value)}"`;

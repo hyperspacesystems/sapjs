@@ -61,3 +61,11 @@ test("the accepted edge cases really differ from the writer's bytes", () => {
   expect(noLineFeeds).not.toBe(tableHtml(budgetSheet));
   expect(spaceAndTab).not.toBe(tableHtml(budgetSheet));
 });
+
+test("a table ending in a rules block reads every rule", () => {
+  const src = '<table grid><tbody>\n<tr data-id="r" data-pos="G"><td>x</td></tr>\n</tbody><template rules>\n<rule data-id="k" data-pos="G" kind="check" range="A1:A9"></rule>\n</template></table>';
+  const result = scanAt(src, 0);
+  expect(result.verdict).toBe("accept");
+  expect(result.end).toBe(src.length);
+  expect(result.rules.map(({ rule }) => rule)).toEqual([{ id: "k", pos: "G", kind: "check", range: "A1:A9" }]);
+});

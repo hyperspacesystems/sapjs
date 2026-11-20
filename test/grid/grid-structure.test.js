@@ -478,3 +478,39 @@ test("new rows and columns take their ids from the Grid's newId, which gives the
     [true, true],
   ]);
 });
+
+test("a grid with rules and no formula engine refuses a row insert above its rules", () => {
+  const html =
+    '<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup>\n<tbody>\n' +
+    Array.from({ length: 6 }, (unused, i) => `<tr data-id="r${i + 1}" data-pos="${"8GVdlz"[i]}"><td>${i + 1}</td><td>${i}</td></tr>`).join("\n") +
+    "\n</tbody></table>";
+  const page = live(html);
+  const rule = { id: "k", pos: "G", kind: "check", range: "B2:B5" };
+  expect(page.grid.setRules({ set: [rule] })).not.toBeNull();
+  expect(refusal(() => page.grid.insertRows(1, 1))).toEqual([true, "needs_formula_engine"]);
+  expect(page.grid.insertRows(7, 1)).not.toBeNull();
+  expect(page.grid.size.rows).toBe(7);
+});
+
+test("a rules block the page put back is read before the next rules write", () => {
+  const page = live(TINY);
+  const block = document.createElement("template");
+  block.setAttribute("rules", "");
+  block.innerHTML = '<rule data-id="k1" data-pos="G" kind="check" range="A1:A9"></rule>';
+  page.table.appendChild(block);
+  const k1 = { id: "k1", pos: "G", kind: "check", range: "A1:A9" };
+  const k2 = { id: "k2", pos: "V", kind: "list", range: "C2:C4", items: ["Open", "Done"] };
+  expect(page.grid.setRules({ set: [k2] })).not.toBeNull();
+  expect(page.grid.rules()).toEqual([k1, k2]);
+});
+
+test("setRules fires one change event and rules() reads the rules", () => {
+  const page = live(TINY);
+  const rules = [
+    { id: "b", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] },
+    { id: "a", pos: "G", kind: "check", range: "A1:A9" },
+  ];
+  expect(page.grid.setRules({ set: rules })).not.toBeNull();
+  expect(page.heard.length).toBe(1);
+  expect(page.grid.rules()).toEqual([rules[1], rules[0]]);
+});

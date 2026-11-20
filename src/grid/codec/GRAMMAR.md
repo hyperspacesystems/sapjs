@@ -9,7 +9,7 @@ Why it is strict: a reader that accepts more than the writer emits can read a va
 Over the decoded text of the file. `ws` is a run of zero or more space, tab and line feed characters. Nothing else may appear between the tokens shown.
 
 ```
-grid     = '<table grid' [' freeze-cols="' count '"'] [' stale'] '>' ws [colgroup ws] [thead ws] {tbody ws} '</table>'
+grid     = '<table grid' [' freeze-cols="' count '"'] [' stale'] '>' ws [colgroup ws] [thead ws] {tbody ws} [rules ws] '</table>'
 colgroup = '<colgroup>' {ws col} ws '</colgroup>'
 col      = '<col data-id="' aval '" data-pos="' aval '"' [' fmt="' aval '"'] [' hidden'] [' style="width:' count 'px"'] '>'
 thead    = '<thead>' {ws row} ws '</thead>'
@@ -17,6 +17,14 @@ tbody    = '<tbody>' {ws row} ws '</tbody>'
 row      = '<tr data-id="' aval '" data-pos="' aval '"' [' hidden'] [' style="' aval '"'] '>' {cell} '</tr>'
 cell     = '<td' [' n'] [' t'] [' f="' aval '"'] [' v="' aval '"'] [' fmt="' aval '"']
            [' colspan="' count '"'] [' rowspan="' count '"'] [' hidden'] [' style="' aval '"'] '>' text '</td>'
+rules    = '<template rules>' {ws rule} ws '</template>'        at least one rule
+rule     = '<rule data-id="' aval '" data-pos="' aval '" kind="' kind '" range="' aval '"'
+           [' items="' aval '"'] [' source="' aval '"'] [' open'] [' test="' test '"'] [' a="' aval '"'] [' b="' aval '"']
+           [' f="' aval '"'] [' style="' aval '"'] [' low="' color '"'] [' mid="' color '"'] [' high="' color '"'] '></rule>'
+kind     = 'check' | 'list' | 'when' | 'scale'
+test     = 'gt' | 'ge' | 'lt' | 'le' | 'eq' | 'ne' | 'contains' | 'starts' | 'ends' | 'between' | 'outside'
+         | 'empty' | 'filled' | 'duplicate' | 'unique' | 'formula'
+color    = '#' 6 * ('0'..'9' | 'a'..'f')
 aval     = { any character except '"' '&' CR NUL  |  '&amp;'  |  '&quot;' }
 text     = { any character except '<' '>' '&' CR NUL  |  '&amp;'  |  '&lt;'  |  '&gt;' }
 count    = '0' | ('1'..'9') {'0'..'9'}        at most 7 characters
@@ -35,16 +43,35 @@ Further rules the grammar alone does not show:
 
 `tableHtml(sheet, { groupSize = 50 })` writes the table start tag, the `colgroup` on the same line, then a line feed. Frozen rows go in one `thead`, one row per line. Data rows go in `tbody` groups of `groupSize` rows, one row per line, except that a group never ends inside a merge down a column: it runs on until every merge open at its cut has ended (`groupStarts(rows, groupSize)`), since a browser draws no cell across two row groups. The next group counts its `groupSize` rows from where the longer group ended. An empty sheet still gets one empty `tbody`. The reader accepts a group of any size. Escapes: `&amp; &lt; &gt;` in text, `&amp; &quot;` in attribute values, nothing else. A carriage return or a NUL in any value is an error, never written: callers turn CRLF into LF before they write.
 
+## Rules
+
+A table may end with one `<template rules>` block, after its last row group. A browser keeps a `<template>` inside a table where it is, draws nothing for it, and keeps its children out of the table's rows and cells, so a reader without script and every reader of the rows are unaffected. A parser puts the `<rule>` elements in the template's content, not under the element: a tree reader reads them from there.
+
+Each `<rule>` is one checkbox column, dropdown, conditional format or color scale over `range`, an A1 range on its own tab (`C2:C40`, an open-ended `C2:C`, or one cell). `data-id` and `data-pos` are an id and an order key as rows have; rules are written in `data-pos` order, and an earlier rule wins where two conditional formats set the same property.
+
+- `check`: each cell of the range shows a checkbox; its value is `TRUE` or `FALSE`, and a blank shows unchecked. No other attribute.
+- `list`: each cell shows a dropdown of `items` (a JSON array of 1 to 500 strings, each 1 to 255 characters with no carriage return, NUL or half of a surrogate pair, written exactly as `JSON.stringify` writes it) or of the values in `source` (an A1 range, which may name another tab). Exactly one of the two. With `open`, a value not in the list is kept and marked; without it, the app refuses it.
+- `when`: each cell for which `test` holds takes `style`. `a` and `b` hold the compared values as stored text: `between` and `outside` take both, `empty`, `filled`, `duplicate` and `unique` take neither, every other test takes `a`, and `formula` takes `f`, a formula written for the range's top-left cell. No other attribute.
+- `scale`: each number in the range takes a background between `low` (the range's smallest number), the optional `mid` (its middle) and `high` (its largest).
+
+A rule covers places in the sheet. Inserting or deleting rows and columns moves its range and source as a formula's references move (a range whose rows are all gone removes the rule); moving or sorting rows leaves them where they are. A `when` rule's `f` is written for the range's top-left cell: its relative parts move with that corner, and its `$` parts keep naming their row or column.
+
+A miss, beyond the grammar: an empty block, an attribute a kind does not take, a missing attribute a kind needs, `items` not written as `JSON.stringify` writes it.
+
+Model: `sheet.rules?: Rule[]`, absent when the table has none. `Rule { id, pos, kind, range, items?: string[], source?, open?: true, test?, a?, b?, f?, style?, low?, mid?, high? }`.
+
 ## The model
 
 The model the writer takes and the reader returns (frozen at Gate A):
 
 ```js
-// sheet: { id, name, pos, freezeCols?: number, stale?: true, cols: Col[], rows: Row[] }
+// sheet: { id, name, pos, freezeCols?: number, stale?: true, cols: Col[], rows: Row[], rules?: Rule[] }
 // Col:   { id, pos, fmt?: string, hidden?: true, width?: number }
 // Row:   { id, pos, frozen?: true, hidden?: true, style?: string, cells: (Cell | null)[] }   trailing nulls are not stored
 // Cell:  { text: string, n?: true, t?: true, f?: string, v?: string, fmt?: string,
 //          colspan?: number, rowspan?: number, hidden?: true, style?: string }
+// Rule:  { id, pos, kind: "check" | "list" | "when" | "scale", range, items?: string[], source?, open?: true,
+//          test?, a?, b?, f?, style?, low?, mid?, high? }
 ```
 
 The reader returns `null` for a bare `<td></td>`.

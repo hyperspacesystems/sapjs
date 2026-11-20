@@ -25,6 +25,7 @@ export function gridModel(src, at) {
     table: (table) => Object.assign(sheet, table),
     col: (col) => sheet.cols.push(col),
     row: (row) => sheet.rows.push(row),
+    rule: (rule) => (sheet.rules ??= []).push(rule),
   });
   return sheet;
 }

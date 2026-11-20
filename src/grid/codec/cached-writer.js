@@ -12,7 +12,7 @@
 // One writer follows one model: the Grid's mirror and the room's admitted copy each get their own.
 // `touch(sheetId)` also forgets a deleted tab's strings.
 
-import { groupHtml, rowHtml, tableParts } from "./write.js";
+import { groupHtml, rowHtml, rulesHtml, tableParts } from "./write.js";
 
 const KNOWN = ["rows", "cols", "cells", "results", "rescanned", "structure"];
 
@@ -109,7 +109,7 @@ export function createSheetWriter({ groupSize = 50 } = {}) {
     }
     tab.groups = groups;
     tab.groupOf = groupOf;
-    return `${html}</table>`;
+    return `${html}${rulesHtml(sheet.rules)}</table>`;
   }
 
   return { table, touch };

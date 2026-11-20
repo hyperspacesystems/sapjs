@@ -384,3 +384,30 @@ test("undoing a paste that added rows after a coworker deleted one of them puts 
   expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r1", "r2", "r3"]);
   expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([30, 10, 20]);
 });
+
+test("a tab's rules survive a room read and write", () => {
+  const doc = book();
+  const rules = [{ id: "k1", pos: "G", kind: "check", range: "A1:A9" }];
+  doc.tabs[0].sheet.rules = rules;
+  const back = codec.read(codec.write(doc, RECORD));
+  expect(back.doc.tabs[0].sheet.rules).toEqual(rules);
+});
+
+test("a room refuses an undo whose rule restore holds a rule no rules action could write", () => {
+  const revert = (rules) => ({ v: 1, t: "revert", of: null, step: { action: { v: 1, t: "set", sheet: "s1", cells: [["r1", "b", 5]] }, restore: [], rules }, wrote: [] });
+  const anyStyle = ["s1", "k", { id: "k", pos: "V", kind: "when", range: "A1:A9", test: "gt", a: "1", style: "position:fixed" }, null];
+  const carriageReturn = ["s1", "k", { id: "k", pos: "V", kind: "check", range: "A1\rB2" }, null];
+  expect([codec.validate(revert([anyStyle])), codec.validate(revert([carriageReturn]))]).toEqual([false, false]);
+});
+
+test("undoing a row insert on a tab with rules is accepted in a room", () => {
+  const doc = book();
+  const rule = { id: "k1", pos: "G", kind: "list", range: "B2:B3", items: ["Open", "Done"] };
+  doc.tabs[0].sheet.rules = [rule];
+  const out = codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "A" }] });
+  expect(out.out).toBe("applied");
+  expect(doc.tabs[0].sheet.rules[0].range).toBe("B3:B4");
+  expect(codec.fits(doc, out.inverse)).toBe(true);
+  expect(codec.apply(doc, out.inverse).out).toBe("applied");
+  expect(doc.tabs[0].sheet.rules[0].range).toBe("B2:B3");
+});

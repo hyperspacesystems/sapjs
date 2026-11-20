@@ -748,9 +748,10 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
     const cells = bySheet(changed.cells);
     const rows = bySheet(changed.rows);
     const cols = bySheet(changed.cols);
+    const table = bySheet(changed.table ?? []);
     for (const [sheet, heard] of listeners) {
-      if (sheet !== from && (cells.has(sheet) || rows.has(sheet) || cols.has(sheet) || changed.sheets.includes(sheet))) {
-        for (const listener of [...heard]) listener({ source: "workbook", cells: cells.get(sheet) ?? [], rows: rows.get(sheet) ?? [], cols: cols.get(sheet) ?? [], structure: changed.structure });
+      if (sheet !== from && (cells.has(sheet) || rows.has(sheet) || cols.has(sheet) || table.has(sheet) || changed.sheets.includes(sheet))) {
+        for (const listener of [...heard]) listener({ source: "workbook", cells: cells.get(sheet) ?? [], rows: rows.get(sheet) ?? [], cols: cols.get(sheet) ?? [], structure: changed.structure || table.has(sheet) });
       }
     }
     for (const [sheet, list] of bySheet(changed.results ?? [])) {

@@ -1,6 +1,7 @@
 // node test/mutations/grid-codec.mjs [keys-trailing-zero|codec-hidden-order|codec-group-merge|patch-keeps-hidden|
 //   writer-cells|writer-results|writer-rows|writer-cols|writer-repeated-id|writer-structure|writer-result-cells|
-//   writer-event-rows|writer-rescanned|writer-extras-swap|writer-result-flags]
+//   writer-event-rows|writer-rescanned|writer-extras-swap|writer-result-flags|rules-scan|rules-shape|rules-empty|
+//   rules-items-canonical|rules-tree-content|rules-patch-tail|rules-reshape-last|rules-room-read]
 // Each entry removes one rule from the grid codec and names the test that must then
 // fail. With no argument every entry runs, one after another.
 import { mutate } from "./harness.mjs";
@@ -147,5 +148,77 @@ mutate({
     test: CACHED_TEST,
     name: CACHED_LAW,
     expects: /toBeNull/,
+  },
+  "rules-scan": {
+    what: "the strict reader has no rules block, so every table with rules is a miss",
+    file: "src/grid/codec/scan.js",
+    find: '  if (src.startsWith("<template rules>", i)) {',
+    replace: "  if (false) {",
+    test: "test/grid-codec/scan.test.js",
+    name: "a table ending in a rules block reads every rule",
+    expects: /toBe|toEqual/,
+  },
+  "rules-shape": {
+    what: "the strict reader takes a rule of any shape, so a rule the writer would refuse reads as canonical",
+    file: "src/grid/codec/scan.js",
+    find: "  if (problem !== null) miss(problem, start);",
+    replace: "",
+    test: "test/grid-codec/hostile.test.js",
+    name: "miss: rules: unknown kind",
+    expects: /toBe|toEqual/,
+  },
+  "rules-empty": {
+    what: "the strict reader takes an empty rules block, which the writer never writes",
+    file: "src/grid/codec/scan.js",
+    find: '    if (count === 0) miss("an empty rules block", start);',
+    replace: "",
+    test: "test/grid-codec/hostile.test.js",
+    name: "miss: rules: empty block",
+    expects: /toBe|toEqual/,
+  },
+  "rules-items-canonical": {
+    what: "the strict reader takes items written another way than the writer writes them",
+    file: "src/grid/codec/scan.js",
+    find: "if (!Array.isArray(items) || JSON.stringify(items) !== raw)",
+    replace: "if (!Array.isArray(items))",
+    test: "test/grid-codec/hostile.test.js",
+    name: "miss: rules: items with a space",
+    expects: /toBe|toEqual/,
+  },
+  "rules-tree-content": {
+    what: "the tree reader reads a template's element children, which a parser leaves empty, so a save after a reload drops every rule",
+    file: "src/grid/codec/canonical.js",
+    find: '  children: (node) => Array.from(node.localName === "template" ? node.content.children : node.children),',
+    replace: "  children: (node) => Array.from(node.children),",
+    test: "test/grid-codec/canonical.test.js",
+    name: "a parsed table keeps its rules, and a rule a hand edit broke is left out",
+    expects: /toBe|toEqual/,
+  },
+  "rules-patch-tail": {
+    what: "a host patch writes new row groups after the rules block, which the next read misses on",
+    file: "src/grid/codec/patch.js",
+    find: '  const tail = grid.rulesAt ?? grid.end - "</table>".length;',
+    replace: '  const tail = grid.end - "</table>".length;',
+    test: "test/grid-codec/patch.test.js",
+    name: "appending rows past a group keeps the rules block at the table's end",
+    expects: /toBe|toEqual/,
+  },
+  "rules-reshape-last": {
+    what: "the DOM backing leaves a hand-placed rules block among the row groups",
+    file: "src/grid/backing-dom.js",
+    find: "    if (rules && rules.nextElementSibling !== null) table.appendChild(rules);",
+    replace: "",
+    test: "test/grid/backing-dom-structure.test.js",
+    name: "a hand-edited table with its rules block before the rows gets it back last",
+    expects: /toBe|toEqual/,
+  },
+  "rules-room-read": {
+    what: "the room codec reads a tab without its rules, so a room capture drops every rule",
+    file: "src/grid/room-codec.js",
+    find: ", rule: (rule) => (sheet.rules ??= []).push(rule) });",
+    replace: " });",
+    test: "test/grid-room/codec.test.js",
+    name: "a tab's rules survive a room read and write",
+    expects: /toBe|toEqual/,
   },
 });

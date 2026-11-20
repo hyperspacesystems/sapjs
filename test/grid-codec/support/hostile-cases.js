@@ -4,6 +4,8 @@ export const CELLS = (cells) => `<table grid><tbody>\n<tr data-id="r" data-pos="
 const ROW = (row) => `<table grid><tbody>\n${row}\n</tbody></table>`;
 const TABLE = (start, rest = "") =>
   `${start}<tbody>\n<tr data-id="r" data-pos="G"><td>x</td></tr>\n</tbody>${rest}</table>`;
+const RULES = (rules) => TABLE("<table grid>", `<template rules>\n${rules}\n</template>`);
+const R = '<rule data-id="k" data-pos="G" kind="check" range="A1:A9"></rule>';
 
 export const MISSES = [
   ["cell <td>&copy 2026</td>", CELLS("<td>&copy 2026</td>")],
@@ -57,4 +59,20 @@ export const MISSES = [
     "table with two <thead>s",
     '<table grid><thead>\n<tr data-id="r" data-pos="G"><td>x</td></tr>\n</thead><thead>\n<tr data-id="t" data-pos="O"><td>y</td></tr>\n</thead></table>',
   ],
+  ["rules: empty block", TABLE("<table grid>", "<template rules>\n</template>")],
+  ["rules: unknown kind", RULES('<rule data-id="k" data-pos="G" kind="chart" range="A1:A9"></rule>')],
+  ["rules: range before kind", RULES('<rule data-id="k" data-pos="G" range="A1:A9" kind="check"></rule>')],
+  ["rules: attribute a check does not take", RULES('<rule data-id="k" data-pos="G" kind="check" range="A1:A9" style="color:red"></rule>')],
+  ["rules: unknown attribute", RULES('<rule data-id="k" data-pos="G" kind="check" range="A1:A9" x="1"></rule>')],
+  ["rules: items with a space", RULES('<rule data-id="k" data-pos="G" kind="list" range="A1:A9" items="[ &quot;a&quot;]"></rule>')],
+  ["rules: items with an escaped carriage return", RULES('<rule data-id="k" data-pos="G" kind="list" range="A1:A9" items="[&quot;a\\rb&quot;]"></rule>')],
+  ["rules: items and source", RULES('<rule data-id="k" data-pos="G" kind="list" range="A1:A9" items="[&quot;a&quot;]" source="B1:B9"></rule>')],
+  ["rules: when with no style", RULES('<rule data-id="k" data-pos="G" kind="when" range="A1:A9" test="gt" a="5"></rule>')],
+  ["rules: when with an unknown test", RULES('<rule data-id="k" data-pos="G" kind="when" range="A1:A9" test="bogus" style="color:red"></rule>')],
+  ["rules: uppercase color", RULES('<rule data-id="k" data-pos="G" kind="scale" range="A1:A9" low="#F6F7F9" high="#57bb8a"></rule>')],
+  ["rules: a tag inside a rule", RULES('<rule data-id="k" data-pos="G" kind="check" range="A1:A9"><b></b></rule>')],
+  ["rules: a self-closed rule", RULES('<rule data-id="k" data-pos="G" kind="check" range="A1:A9"/>')],
+  ["rules: two blocks", TABLE("<table grid>", `<template rules>\n${R}\n</template><template rules>\n${R}\n</template>`)],
+  ["rules: block before the rows", `<table grid><template rules>\n${R}\n</template><tbody>\n<tr data-id="r" data-pos="G"><td>x</td></tr>\n</tbody></table>`],
+  ['rules: bare attribute value on open', RULES('<rule data-id="k" data-pos="G" kind="list" range="A1:A9" source="B1:B9" open=""></rule>')],
 ];

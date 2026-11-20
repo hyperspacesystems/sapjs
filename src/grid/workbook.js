@@ -11,13 +11,17 @@
 // restore is guarded: it puts a formula back only while the formula still means what this action
 // left there, judged before the inverse's own rewrite (rule 6). All or nothing: when the rewrite or
 // a restore throws, every write is taken back and the step is refused.
+// Rules (a tab's checkboxes, dropdowns and conditional formats) move with every structural or tab
+// step as formulas do, and the inverse carries a guarded `rules` list beside `restore`
+// (`settleRules`).
 
 import { gridModel } from "./codec/read.js";
 import { isKey, keysBetween } from "./codec/order-keys.js";
 import { contentOf, derive as defaultDerive } from "./content.js";
 import { apply, cellExtra, GridRefused, inverseContent } from "./ops.js";
 import { modelBacking } from "./backing-model.js";
-import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, originalSlots, print, restoreSlots, shiftRows, slotsOf } from "./formula/text.js";
+import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, moveAnchored, originalSlots, print, restoreSlots, shiftRows, slotsOf, topLeftOf } from "./formula/text.js";
+import { sameRule } from "./codec/rules.js";
 
 const STRUCTURAL = new Set(["insertRows", "deleteRows", "changeRows", "insertCols", "deleteCols", "changeCols"]);
 const TAB = new Set(["insertSheet", "deleteSheet", "renameSheet", "moveSheet"]);
@@ -26,6 +30,10 @@ const refusal = (code, detail) => ({ out: "refused", code, detail });
 // A set that grows the sheet (typing past its edge) inserts rows or columns too.
 const grows = (action) => action.t === "set" && ((action.rows?.length ?? 0) > 0 || (action.cols?.length ?? 0) > 0);
 const structural = (action) => (action.t === "batch" ? action.actions.some(structural) : STRUCTURAL.has(action.t) || grows(action));
+// Inserted and deleted rows and columns move a rule's ranges; a move or a sort does not, since a rule
+// covers places in the sheet (Sheets keeps a rule where it is when rows are sorted or moved).
+const RESIZES = new Set(["insertRows", "deleteRows", "insertCols", "deleteCols"]);
+const resizes = (action) => (action.t === "batch" ? action.actions.some(resizes) : RESIZES.has(action.t) || grows(action));
 const sheetOf = (action) => (action.t === "batch" ? action.actions[0]?.sheet : action.sheet);
 // A formula content is always `{ f }`; a string is text, even one that starts with "=" (the reducer's rule).
 const formulaOf = (content) => (content && typeof content === "object" && typeof content.f === "string" ? content.f : null);
@@ -180,13 +188,18 @@ export function applyWorkbook(wb, step, { derive = defaultDerive, engine = null 
   const inverseStep = step.action !== undefined && step.t === undefined;
   const action = inverseStep ? step.action : step;
   const restore = inverseStep ? step.restore ?? [] : [];
+  const ruleRestore = inverseStep ? step.rules ?? [] : [];
   // Each tab's stale mark before the step: the reducer marks a tab stale on a formula write, and a
   // refused step leaves every tab as it was, the mark too.
   const stale = new Map(wb.sheets().map((tab) => [tab.id, tab.backing.sheet.stale === true]));
-  const run = { wb, derive, computed: engine !== null, stale, journal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false, sorted: [] } };
+  const run = { wb, derive, computed: engine !== null, stale, journal: [], ruleJournal: [], undo: null, changed: { sheets: [], cells: [], rows: [], cols: [], table: [], formulas: [], results: [], structure: false, sorted: [] } };
+  // Rules are judged and moved only when a tab has one or the step puts one back.
+  const rulesBefore = ruleRestore.length > 0 || wb.sheets().some((tab) => tab.backing.rules().length > 0) ? rulesOf(wb) : null;
+  const ruleFrame = rulesBefore !== null && (TAB.has(action.t) || resizes(action)) ? frameOf(wb) : null;
   let out;
   try {
     out = action.t === "sort" ? applySort(run, action, restore) : TAB.has(action.t) ? applyTab(run, action, restore) : applySheet(run, action, restore);
+    if (out.out === "applied" && rulesBefore !== null && action.t !== "rules") settleRules(run, action, ruleRestore, rulesBefore, ruleFrame, out.inverse);
   } catch (err) {
     takeBack(run);
     if (err instanceof GridRefused) return refusal(err.code, err.detail);
@@ -211,6 +224,8 @@ function put(run, tab, r, c, next) {
 }
 
 function takeBack(run) {
+  for (const { sheet, old } of run.ruleJournal.reverse()) run.wb.sheets().find((t) => t.id === sheet)?.backing.setRules(old);
+  run.ruleJournal = [];
   for (const { sheet, row, col, old } of run.journal.reverse()) {
     const tab = run.wb.sheets().find((t) => t.id === sheet);
     const r = tab?.backing.rowIndex(row) ?? -1;
@@ -224,6 +239,106 @@ function takeBack(run) {
     const was = run.stale.get(tab.id);
     if (was !== undefined && (tab.backing.sheet.stale === true) !== was) tab.backing.setStale(was);
   }
+}
+
+const ruleKey = (sheet, id) => `${sheet}\u0000${id}`;
+
+function rulesOf(wb) {
+  const out = new Map();
+  for (const tab of wb.sheets()) for (const rule of tab.backing.rules()) out.set(ruleKey(tab.id, rule.id), { sheet: tab.id, rule });
+  return out;
+}
+
+// Every rule write goes through here, so a failure can take it back.
+function putRules(run, tab, list) {
+  const old = tab.backing.rules();
+  tab.backing.setRules(list);
+  run.ruleJournal.push({ sheet: tab.id, old });
+  run.changed.table.push({ sheet: tab.id, field: "rules", before: JSON.stringify(old), after: JSON.stringify(tab.backing.rules()) });
+}
+
+// A rule's formula text in the frame after a step, as a formula cell's is printed.
+function moveFormula(f, sid, before, after) {
+  const bound = bind(f, sid, before);
+  return bound === null ? f : print(bound, sid, before, after);
+}
+
+// Whether a reference's text names other records after the step than before it: a deleted end
+// that the next row took over, an end past the edge that now lands on a row, a tab name that now
+// names a tab. The undo cannot get those back by moving the text again, so the inverse keeps them.
+function rebinds(text, sid, before, after, next) {
+  const was = bind(`=${text}`, sid, before);
+  const now = bind(`=${next}`, sid, after);
+  if (was === null || now === null) return text !== next;
+  return JSON.stringify(idsOf(was)) !== JSON.stringify(idsOf(now));
+}
+
+// A rule moved by a step that inserted or deleted rows or columns, or by a tab action: null when its
+// range is gone. A source or a formula that lost what it named keeps #REF!, as a formula cell would.
+// The formula is written for the range's top-left cell, so after rows or columns came or went it
+// moves with that corner (`moveAnchored`); a tab action renames or cuts the tabs it names.
+function moveRule(rule, sid, before, after, tabStep) {
+  const range = moveFormula(`=${rule.range}`, sid, before, after).slice(1);
+  if (range.includes("#REF!")) return { rule: null, rebound: true };
+  const out = { ...rule, range };
+  if (rule.source !== undefined) out.source = moveFormula(`=${rule.source}`, sid, before, after).slice(1);
+  if (rule.f !== undefined) {
+    const was = topLeftOf(rule.range);
+    const now = topLeftOf(range);
+    out.f = tabStep ? moveFormula(rule.f, sid, before, after) : moveAnchored(rule.f, sid, before, after, now.row - was.row, now.col - was.col);
+  }
+  const rebound = rebinds(rule.range, sid, before, after, range) || (rule.source !== undefined && rebinds(rule.source, sid, before, after, out.source));
+  const same = out.range === rule.range && out.source === rule.source && out.f === rule.f;
+  return { rule: same ? rule : out, rebound };
+}
+
+// Moves every rule of every tab (a source or formula can name another tab). A tab the step brought
+// in already has its rules in the new frame. Returns the keys of the rules the step rebound.
+function rewriteRules(run, before, after, tabStep) {
+  const rebound = new Set();
+  for (const tab of run.wb.sheets()) {
+    const rules = tab.backing.rules();
+    if (rules.length === 0 || !before.has(tab.id)) continue;
+    const next = [];
+    let changed = false;
+    for (const rule of rules) {
+      const moved = moveRule(rule, tab.id, before, after, tabStep);
+      if (moved.rebound) rebound.add(ruleKey(tab.id, rule.id));
+      if (moved.rule !== rule) changed = true;
+      if (moved.rule !== null) next.push(moved.rule);
+    }
+    if (changed) putRules(run, tab, next);
+  }
+  return rebound;
+}
+
+function restoreRule(run, sheet, id, back) {
+  const tab = run.wb.sheets().find((t) => t.id === sheet);
+  if (!tab) return;
+  const rules = tab.backing.rules();
+  if (sameRule(rules.find((rule) => rule.id === id), back)) return;
+  putRules(run, tab, [...rules.filter((rule) => rule.id !== id), ...(back === null ? [] : [back])]);
+}
+
+// After a step: a step that inserted or deleted rows or columns, or a tab action, moves every rule;
+// each rule the inverse puts back comes back only while it still is what the undone step left (no
+// coworker changed it since); and the inverse gets one entry [sheet, id, back, left] for every rule
+// the whole step changed or rebound, with `back` the rule before the step and `left` the rule after
+// it (null where there was none).
+function settleRules(run, action, ruleRestore, rulesBefore, before, inverse) {
+  const rebound = before === null ? new Set() : rewriteRules(run, before, frameOf(run.wb), TAB.has(action.t));
+  for (const [sheet, id, back, left] of ruleRestore) {
+    if (sameRule(rulesBefore.get(ruleKey(sheet, id))?.rule, left)) restoreRule(run, sheet, id, back);
+  }
+  const after = rulesOf(run.wb);
+  const changes = [];
+  for (const key of new Set([...rulesBefore.keys(), ...after.keys()])) {
+    const was = rulesBefore.get(key);
+    const now = after.get(key);
+    if (sameRule(was?.rule, now?.rule) && !rebound.has(key)) continue;
+    changes.push([(was ?? now).sheet, (was ?? now).rule.id, was?.rule ?? null, now?.rule ?? null]);
+  }
+  if (changes.length > 0) inverse.rules = changes;
 }
 
 function applySheet(run, action, restore) {
