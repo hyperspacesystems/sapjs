@@ -20,6 +20,7 @@ import { byPos, modelWorkbook } from "./workbook-backing.js";
 import { boxesApart, clearedBetween, cutsFrozen, mergeBoxes, needs as needsOf, creates as createsOf, orderedCols, orderedRows, ruleRefusal, targets as targetsOf, validate as validateOne } from "./ops.js";
 import { scanGrid } from "./codec/scan.js";
 import { createSheetWriter } from "./codec/cached-writer.js";
+import { chartsHtml, drawingProblem } from "./codec/charts.js";
 import { fnv1a, hex } from "./codec/digest.js";
 import { effectiveFmt, waitsForFormatter, contentOf } from "./content.js";
 import { fromIds, meaning, print, shiftRows } from "./formula/text.js";
@@ -175,12 +176,16 @@ function touchWriter(doc, changed) {
   for (const [id, part] of parts) if (!drop.has(id)) writer.touch(id, part);
 }
 
+// `extras` is the results function, or `{ result, drawing }`: `drawing(tabId, chartId)` gives the
+// last drawing of a chart, which the doc never holds, so a write without one writes no figure for it.
 function write(doc, record, extras = null) {
-  const writer = extras ? createSheetWriter() : writerOf(doc);
+  const result = typeof extras === "function" ? extras : typeof extras?.result === "function" ? extras.result : null;
+  const drawing = typeof extras?.drawing === "function" ? extras.drawing : () => undefined;
+  const writer = result ? createSheetWriter() : writerOf(doc);
   let out = "";
   for (const tab of doc.tabs) {
-    const sheet = staleOf(tab, extras) ? { ...tab.sheet, stale: true } : tab.sheet;
-    out += `<section item="" data-id="${attrEscape(tab.id)}" data-pos="${attrEscape(tab.pos)}"><h2 bind="name">${textEscape(tab.name)}</h2>${writer.table(tab.id, sheet, extras)}</section>\n`;
+    const sheet = staleOf(tab, result) ? { ...tab.sheet, stale: true } : tab.sheet;
+    out += `<section item="" data-id="${attrEscape(tab.id)}" data-pos="${attrEscape(tab.pos)}"><h2 bind="name">${textEscape(tab.name)}</h2>${writer.table(tab.id, sheet, result)}${chartsHtml(sheet.rules, (id) => drawing(tab.id, id))}</section>\n`;
   }
   return `${out}<script type="application/json" sheet-commit="">${JSON.stringify(record ?? {}).replaceAll("<", "\\u003c")}</script>`;
 }
@@ -245,7 +250,18 @@ function read(bytes) {
       }
       delete sheet.stale;
       at = space(src, at);
-      if (!src.startsWith("</section>", at)) throw new Error(`sheet codec: tab ${JSON.stringify(id)} holds more than its name and its table`);
+      // A chart's drawing after the table is the app's output, not the room's: it is passed over.
+      for (let figure = startTag(src, at); figure?.name === "figure" && figure.attrs.has("chart"); figure = startTag(src, at)) {
+        const close = src.indexOf("</figure>", figure.end);
+        if (close < 0) throw new Error(`sheet codec: tab ${JSON.stringify(id)} has a chart drawing that does not end`);
+        if (src.slice(at, figure.end) !== `<figure chart="${attrEscape(figure.attrs.get("chart"))}" sap-ignore="">`) {
+          throw new Error(`sheet codec: tab ${JSON.stringify(id)} has a chart drawing whose figure is not <figure chart="ID" sap-ignore="">`);
+        }
+        const problem = drawingProblem(src.slice(figure.end, close));
+        if (problem !== null) throw new Error(`sheet codec: tab ${JSON.stringify(id)} has a chart drawing the codec does not read: ${problem}`);
+        at = space(src, close + 9);
+      }
+      if (!src.startsWith("</section>", at)) throw new Error(`sheet codec: tab ${JSON.stringify(id)} holds more than its name, its table and its charts' drawings`);
       tabs.push({ id, name: decode(raw), pos: tag.attrs.get("data-pos") ?? "", sheet });
       i = space(src, at + 10);
       continue;
@@ -264,6 +280,28 @@ function read(bytes) {
   if (tabs.length === 0) throw new Error("sheet codec: the workbook has no tab");
   tabs.sort(byPos);
   return { record, doc: { tabs } };
+}
+
+// The drawings a workbook's bytes hold, as `write`'s `extras.drawing` takes them: a writer that
+// replaces these bytes keeps each chart's last drawing. It reads only tab starts and figures, so
+// bytes with no commit record yet, or a tab the codec would refuse, still give their drawings; a
+// drawing the codec would refuse is left out.
+export function drawingsIn(bytes) {
+  const src = String(bytes);
+  const found = new Map();
+  let tab = null;
+  for (const m of src.matchAll(/<section\b[^>]*?\sdata-id="([^"]*)"[^>]*>|<figure chart="([^"]*)" sap-ignore="">/g)) {
+    if (m[1] !== undefined) {
+      tab = decode(m[1]);
+      continue;
+    }
+    const close = src.indexOf("</figure>", m.index + m[0].length);
+    if (tab === null || close < 0) continue;
+    const html = src.slice(m.index + m[0].length, close);
+    const key = `${tab}\u0000${decode(m[2])}`;
+    if (drawingProblem(html) === null && !found.has(key)) found.set(key, html);
+  }
+  return (tab, chart) => found.get(`${tab}\u0000${chart}`);
 }
 
 // ---------------------------------------------------------------------------------------------

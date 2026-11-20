@@ -154,6 +154,8 @@ test("Sap.grid exists after install, and Sap.use called twice still gives one gr
   expect(Sap.grid.tokenize).toBe(tokenize);
   // ClayJS's number-format menu and decimals buttons read these two.
   expect([Sap.grid.fmtKind, Sap.grid.adjustDecimals]).toEqual([fmtKind, adjustDecimals]);
+  // A host's chart panel holds a drawing to the codec's rule and reads a save's drawings back.
+  expect([Sap.grid.drawingProblem, Sap.grid.drawingsIn, Sap.grid.areaOf].map((fn) => typeof fn)).toEqual(["function", "function", "function"]);
 
   // Asked for before the plugin's first pass, with a raw edit in the same turn: the pass that
   // follows the install reads it.

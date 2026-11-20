@@ -1,7 +1,7 @@
 // The canonical writer: the only bytes the strict reader (scan.js) accepts.
 // GRAMMAR.md is the contract; change the two together or not at all.
 
-import { RULE_FIELDS, ruleProblem } from "./rules.js";
+import { RULE_FIELDS, RULE_FLAGS, ruleProblem } from "./rules.js";
 
 const FORBIDDEN = /[\r\0]/;
 const MAX_COUNT = 9999999;
@@ -67,7 +67,7 @@ export function ruleHtml(rule) {
   let attrs = attr("data-id", rule.id) + attr("data-pos", rule.pos) + attr("kind", rule.kind) + attr("range", rule.range);
   for (const field of RULE_FIELDS) {
     if (rule[field] === undefined) continue;
-    attrs += field === "open" ? " open" : attr(field, field === "items" ? JSON.stringify(rule.items) : rule[field]);
+    attrs += RULE_FLAGS.has(field) ? ` ${field}` : attr(field, field === "items" ? JSON.stringify(rule.items) : rule[field]);
   }
   return `<rule${attrs}></rule>`;
 }

@@ -21,7 +21,8 @@ import { contentOf, derive as defaultDerive } from "./content.js";
 import { apply, cellExtra, GridRefused, inverseContent } from "./ops.js";
 import { modelBacking } from "./backing-model.js";
 import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, moveAnchored, originalSlots, print, restoreSlots, shiftRows, slotsOf, topLeftOf } from "./formula/text.js";
-import { sameRule } from "./codec/rules.js";
+import { MAX_BOX_COL, sameRule } from "./codec/rules.js";
+import { colIndex, colName } from "./a1.js";
 
 const STRUCTURAL = new Set(["insertRows", "deleteRows", "changeRows", "insertCols", "deleteCols", "changeCols"]);
 const TAB = new Set(["insertSheet", "deleteSheet", "renameSheet", "moveSheet"]);
@@ -252,8 +253,8 @@ function rulesOf(wb) {
 // Every rule write goes through here, so a failure can take it back.
 function putRules(run, tab, list) {
   const old = tab.backing.rules();
-  tab.backing.setRules(list);
   run.ruleJournal.push({ sheet: tab.id, old });
+  tab.backing.setRules(list);
   run.changed.table.push({ sheet: tab.id, field: "rules", before: JSON.stringify(old), after: JSON.stringify(tab.backing.rules()) });
 }
 
@@ -273,13 +274,78 @@ function rebinds(text, sid, before, after, next) {
   return JSON.stringify(idsOf(was)) !== JSON.stringify(idsOf(now));
 }
 
+const BOX_ROWS = 9999999;
+const BOX_CELL = /^([A-Z]{1,3})([1-9][0-9]{0,6})$/;
+const endsOf = (box) => {
+  const cells = box.split(":");
+  if (cells.length > 2) return null;
+  const ends = [];
+  for (const cell of cells) {
+    const m = BOX_CELL.exec(cell);
+    const col = m === null ? -1 : colIndex(m[1]);
+    if (col < 0 || col > MAX_BOX_COL) return null;
+    ends.push({ row: Number(m[2]) - 1, col });
+  }
+  return ends;
+};
+const cellAt = (row, col) => `${colName(Math.min(Math.max(col, 0), MAX_BOX_COL))}${Math.min(Math.max(row, 0), BOX_ROWS - 1) + 1}`;
+
+// The index in `now` of the last record that was also in `was`, or -1.
+function lastStaying(ids, other) {
+  let i = ids.length - 1;
+  while (i >= 0 && !other.has(ids[i])) i -= 1;
+  return i;
+}
+
+// How far a step moved the places past a tab's last row (or column): back one for each row it
+// removed before a row that stays, on one for each it put before a row that stays. Rows added or
+// removed after the last row that stays only change where the sheet's records end, so they move
+// nothing, and a step and its undo move the same distance.
+function edgeShift(was, wasAt, now, nowAt) {
+  let shift = 0;
+  for (let i = lastStaying(was, nowAt) - 1; i >= 0; i--) if (!nowAt.has(was[i])) shift -= 1;
+  for (let i = lastStaying(now, wasAt) - 1; i >= 0; i--) if (!wasAt.has(now[i])) shift += 1;
+  return shift;
+}
+
+// Where one end of a box lands on one axis. An end past the last record moves by the edge shift.
+// An end on a record follows the formula move, except when that record and every record after it
+// went: then it is past the edge after the step, and moves by the edge shift as such an end does.
+function placeEnd(index, moved, ids, nowAt, shift) {
+  if (index >= ids.length) return index + shift;
+  if (ids.slice(index).every((id) => !nowAt.has(id))) return index + shift;
+  return moved;
+}
+
+// A chart's box is a picture over the cells, kept the same size when rows or columns come or go
+// outside it. An end past the tab's last row or column has no record to follow, so it moves by
+// the step's shift of the places past the edge. The box stays within XFD and row 9999999 and its
+// top-left end stays first.
+function moveBox(box, moved, was, now) {
+  const old = endsOf(box);
+  const ends = endsOf(moved);
+  if (!was || !now || old === null || ends === null || old.length !== ends.length) return moved;
+  const rows = edgeShift(was.rows, was.rowAt, now.rows, now.rowAt);
+  const cols = edgeShift(was.cols, was.colAt, now.cols, now.colAt);
+  const out = ends.map((end, i) => ({
+    row: placeEnd(old[i].row, end.row, was.rows, now.rowAt, rows),
+    col: placeEnd(old[i].col, end.col, was.cols, now.colAt, cols),
+  }));
+  if (out.length === 1) return cellAt(out[0].row, out[0].col);
+  const [top, bottom] = [Math.min(out[0].row, out[1].row), Math.max(out[0].row, out[1].row)];
+  const [left, right] = [Math.min(out[0].col, out[1].col), Math.max(out[0].col, out[1].col)];
+  return `${cellAt(top, left)}:${cellAt(bottom, right)}`;
+}
+
 // A rule moved by a step that inserted or deleted rows or columns, or by a tab action: null when its
 // range is gone. A source or a formula that lost what it named keeps #REF!, as a formula cell would.
 // The formula is written for the range's top-left cell, so after rows or columns came or went it
 // moves with that corner (`moveAnchored`); a tab action renames or cuts the tabs it names.
+
 function moveRule(rule, sid, before, after, tabStep) {
-  const range = moveFormula(`=${rule.range}`, sid, before, after).slice(1);
-  if (range.includes("#REF!")) return { rule: null, rebound: true };
+  const moved = moveFormula(`=${rule.range}`, sid, before, after).slice(1);
+  if (moved.includes("#REF!")) return { rule: null, rebound: true };
+  const range = rule.kind === "chart" ? moveBox(rule.range, moved, before.get(sid), after.get(sid)) : moved;
   const out = { ...rule, range };
   if (rule.source !== undefined) out.source = moveFormula(`=${rule.source}`, sid, before, after).slice(1);
   if (rule.f !== undefined) {
@@ -287,7 +353,7 @@ function moveRule(rule, sid, before, after, tabStep) {
     const now = topLeftOf(range);
     out.f = tabStep ? moveFormula(rule.f, sid, before, after) : moveAnchored(rule.f, sid, before, after, now.row - was.row, now.col - was.col);
   }
-  const rebound = rebinds(rule.range, sid, before, after, range) || (rule.source !== undefined && rebinds(rule.source, sid, before, after, out.source));
+  const rebound = rule.kind === "chart" || rebinds(rule.range, sid, before, after, range) || (rule.source !== undefined && rebinds(rule.source, sid, before, after, out.source));
   const same = out.range === rule.range && out.source === rule.source && out.f === rule.f;
   return { rule: same ? rule : out, rebound };
 }

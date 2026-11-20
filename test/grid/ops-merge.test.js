@@ -580,7 +580,7 @@ test("a rules action adds, replaces and removes rules, and its inverse puts them
   expect(store.rules()).toEqual([second, first]);
 });
 
-test("a rules action is refused when its range names another tab, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch", () => {
+test("a rules action is refused when its range names another tab or runs past the sheet, its source runs past the sheet, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch", () => {
   const rule = (extra) => ({ id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"], ...extra });
   const when = (extra) => ({ id: "w", pos: "O", kind: "when", range: "A2:D10", test: "formula", f: '=$D2="Late"', style: "background-color:#fde2e1", ...extra });
   const bad = [
@@ -588,6 +588,10 @@ test("a rules action is refused when its range names another tab, its formula do
     action("rules", { set: [when({ f: "=SUM(" })], remove: [] }),
     action("rules", { set: [when({ style: "color: #ff0000" })], remove: [] }),
     action("rules", { set: [rule({}), rule({ pos: "O" })], remove: [] }),
+    action("rules", { set: [rule({ range: "C2:XFE40" })], remove: [] }),
+    action("rules", { set: [rule({ range: "C0:C40" })], remove: [] }),
+    action("rules", { set: [rule({ source: "Other!A1:B10000000" })], remove: [] }),
+    action("rules", { set: [rule({ source: "Other!A0:B1" })], remove: [] }),
     { v: 1, t: "batch", actions: [action("rules", { set: [rule({})], remove: [] })] },
   ];
   for (const one of bad) expect(() => validate(one)).toThrow();

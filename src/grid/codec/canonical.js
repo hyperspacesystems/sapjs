@@ -7,7 +7,7 @@
 //     children(node) -> element children (a template's are its content's),
 //     text(node) -> text content }
 
-import { RULE_FIELDS, ruleProblem } from "./rules.js";
+import { RULE_FIELDS, RULE_FLAGS, ruleProblem } from "./rules.js";
 import { tableHtml } from "./write.js";
 
 const MAX_COUNT = 9999999;
@@ -85,8 +85,8 @@ function ruleModel(adapter, node) {
     if (value !== null) rule[key] = cleanText(value);
   }
   for (const field of RULE_FIELDS) {
-    if (field === "open") {
-      if (has(adapter, node, "open")) rule.open = true;
+    if (RULE_FLAGS.has(field)) {
+      if (has(adapter, node, field)) rule[field] = true;
       continue;
     }
     const value = adapter.attr(node, field);

@@ -458,7 +458,7 @@ function tallMerge() {
 function rules() {
   const colKeys = keysBetween(null, null, 3);
   const rowKeys = keysBetween(null, null, 4);
-  const ruleKeys = keysBetween(null, null, 5);
+  const ruleKeys = keysBetween(null, null, 7);
   return {
     sheets: [
       {
@@ -478,6 +478,8 @@ function rules() {
           { id: "k3", pos: ruleKeys[2], kind: "list", range: "C2:C4", source: "'Other tab'!A1:A9" },
           { id: "k4", pos: ruleKeys[3], kind: "when", range: "B2:C4", test: "formula", f: '=$B2="Done"', style: "font-weight:bold;background-color:#fde2e1" },
           { id: "k5", pos: ruleKeys[4], kind: "scale", range: "C2:C4", low: "#f6f7f9", mid: "#ffd666", high: "#57bb8a" },
+          { id: "k6", pos: ruleKeys[5], kind: "chart", range: "A2:C4", type: "column", stacked: true, title: 'Sales & "plan"', source: "A2:C4" },
+          { id: "k7", pos: ruleKeys[6], kind: "chart", range: "B2:C4", type: "line", series: "rows", source: "'Rules'!A1:C4" },
         ],
       },
     ],

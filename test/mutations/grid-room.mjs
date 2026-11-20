@@ -1,4 +1,4 @@
-// node test/mutations/grid-room.mjs [late-print|inserted-by-tab|rename-spelling|sort-shift|sort-restore|undo-restores|revert-guard|revert-free-name|free-name-skipped|revert-records|revert-gone-cells|wrote-inverse|sort-row-formulas|sort-row-style|creates-id|meaning-unbound|unseen-batch|value-kinds|current-freeze|validate-restore|tab-surrogate|ops-bytes|split-wire|writer-kept|stale-derive|stale-extras|section-comment|merge-done|unmerge-done|own-set|late-was|sort-shift-whole|sort-missing-col|sort-frozen|engine-sorted|index-stale|insert-free-name|holds-refused|unseen-null|merge-skip|meaning-locks|sort-fresh-ties|sort-inverse-pos|sort-undo-needs-rows|sort-undo-keeps-gone|narrow-sort-undo-by-place|undo-restores-order|sort-range-refresh|describe-narrow-sort|field-skip|freeze-skip|col-kinds|narrow-sort-undo-unbound|describe-sort-shift|sort-undo-pos-trim|sort-undo-keeps-slots|sort-stretch-refresh|revert-needs-deleted|revert-delete-gone]
+// node test/mutations/grid-room.mjs [late-print|inserted-by-tab|rename-spelling|sort-shift|sort-restore|undo-restores|revert-guard|revert-free-name|free-name-skipped|revert-records|revert-gone-cells|wrote-inverse|sort-row-formulas|sort-row-style|creates-id|meaning-unbound|unseen-batch|value-kinds|current-freeze|validate-restore|tab-surrogate|ops-bytes|split-wire|writer-kept|stale-derive|stale-extras|section-comment|merge-done|unmerge-done|own-set|late-was|sort-shift-whole|sort-missing-col|sort-frozen|engine-sorted|index-stale|insert-free-name|holds-refused|unseen-null|merge-skip|meaning-locks|sort-fresh-ties|sort-inverse-pos|sort-undo-needs-rows|sort-undo-keeps-gone|narrow-sort-undo-by-place|undo-restores-order|sort-range-refresh|describe-narrow-sort|field-skip|freeze-skip|col-kinds|narrow-sort-undo-unbound|describe-sort-shift|sort-undo-pos-trim|sort-undo-keeps-slots|sort-stretch-refresh|revert-needs-deleted|revert-delete-gone|charts-drawings-in]
 //
 // Each entry removes one rule from the room codec, or from the workbook apply and the engine it
 // needs, and names the test that must then fail. With no argument every entry runs, one after
@@ -555,5 +555,14 @@ mutate({
     test: CODEC_TEST,
     name: "undoing a paste that added rows after a coworker deleted one of them puts back the cells it overwrote",
     expects: RED,
+  },
+  "charts-drawings-in": {
+    what: "a save reads a workbook through the strict reader, so bytes with no commit record, or a tab a coworker edited, throw and every drawing is lost",
+    file: CODEC,
+    find: "    if (tab === null || close < 0) continue;",
+    replace: "    if (tab === null || close < 0) continue; read(src);",
+    test: CODEC_TEST,
+    name: "drawingsIn reads drawings from bytes with no commit record",
+    expects: /sheet codec:|expect|Expected|Received|toBe|toEqual/,
   },
 });

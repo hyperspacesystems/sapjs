@@ -8,7 +8,7 @@ import { isKey } from "./codec/order-keys.js";
 import { copyRule, ruleProblem } from "./codec/rules.js";
 import { isCanonicalStyle, STYLE_PROPERTIES } from "./codec/styles.js";
 import { canonStyle, cleanDeclaration, cleanStyle, declarationProperty, isMixedStyle, mixedNext, splitDeclarations } from "./styles.js";
-import { parse } from "./formula/text.js";
+import { areaOf, parse } from "./formula/text.js";
 import { effectiveFmt, waitsForFormatter } from "./content.js";
 import { derivePlain } from "./derive-plain.js";
 import { isBuiltin } from "./format.js";
@@ -386,10 +386,11 @@ function oneRef(text, anyTab) {
 function checkRule(rule, what) {
   const problem = ruleProblem(rule);
   if (problem !== null) bad(`${what}: ${problem}`);
-  for (const key of ["id", "pos", "range", "source", "a", "b", "f", "style"]) if (rule[key] !== undefined) checkText(rule[key], `${what}.${key}`);
+  for (const key of ["id", "pos", "range", "source", "a", "b", "f", "style", "title"]) if (rule[key] !== undefined) checkText(rule[key], `${what}.${key}`);
   if (!isKey(rule.pos)) bad(`${what}.pos is an order key`);
   if (!oneRef(rule.range, false)) bad(`${what}.range is one range on its own tab`);
-  if (rule.source !== undefined && !rule.source.includes("#REF!") && !oneRef(rule.source, true)) bad(`${what}.source is one range`);
+  if (areaOf(rule.range) === null) bad(`${what}.range is within the sheet's limits`);
+  if (rule.source !== undefined && !rule.source.includes("#REF!") && (!oneRef(rule.source, true) || areaOf(rule.source) === null)) bad(`${what}.source is one range within the sheet's limits`);
   if (rule.f !== undefined && (!rule.f.startsWith("=") || parse(rule.f.slice(1)).error)) bad(`${what}.f is a formula`);
   if (rule.style !== undefined && (cleanStyle(rule.style) !== rule.style || rule.style.split(";").some((pair) => !RULE_STYLE.has(pair.slice(0, pair.indexOf(":")))))) {
     bad(`${what}.style is written as cleanStyle writes it, with only ${[...RULE_STYLE].join(", ")}`);

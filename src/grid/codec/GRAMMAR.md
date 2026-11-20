@@ -20,8 +20,10 @@ cell     = '<td' [' n'] [' t'] [' f="' aval '"'] [' v="' aval '"'] [' fmt="' ava
 rules    = '<template rules>' {ws rule} ws '</template>'        at least one rule
 rule     = '<rule data-id="' aval '" data-pos="' aval '" kind="' kind '" range="' aval '"'
            [' items="' aval '"'] [' source="' aval '"'] [' open'] [' test="' test '"'] [' a="' aval '"'] [' b="' aval '"']
-           [' f="' aval '"'] [' style="' aval '"'] [' low="' color '"'] [' mid="' color '"'] [' high="' color '"'] '></rule>'
-kind     = 'check' | 'list' | 'when' | 'scale'
+           [' f="' aval '"'] [' style="' aval '"'] [' low="' color '"'] [' mid="' color '"'] [' high="' color '"']
+           [' type="' type '"'] [' title="' aval '"'] [' stacked'] [' series="rows"'] '></rule>'
+kind     = 'check' | 'list' | 'when' | 'scale' | 'chart'
+type     = 'column' | 'bar' | 'line' | 'area' | 'pie' | 'scatter'
 test     = 'gt' | 'ge' | 'lt' | 'le' | 'eq' | 'ne' | 'contains' | 'starts' | 'ends' | 'between' | 'outside'
          | 'empty' | 'filled' | 'duplicate' | 'unique' | 'formula'
 color    = '#' 6 * ('0'..'9' | 'a'..'f')
@@ -53,12 +55,50 @@ Each `<rule>` is one checkbox column, dropdown, conditional format or color scal
 - `list`: each cell shows a dropdown of `items` (a JSON array of 1 to 500 strings, each 1 to 255 characters with no carriage return, NUL or half of a surrogate pair, written exactly as `JSON.stringify` writes it) or of the values in `source` (an A1 range, which may name another tab). Exactly one of the two. With `open`, a value not in the list is kept and marked; without it, the app refuses it.
 - `when`: each cell for which `test` holds takes `style`. `a` and `b` hold the compared values as stored text: `between` and `outside` take both, `empty`, `filled`, `duplicate` and `unique` take neither, every other test takes `a`, and `formula` takes `f`, a formula written for the range's top-left cell. No other attribute.
 - `scale`: each number in the range takes a background between `low` (the range's smallest number), the optional `mid` (its middle) and `high` (its largest).
+- `chart`: a chart drawn over the cells of `range` from the values in `source` (an A1 range, which may name another tab). `type` is one of `column` (vertical bars), `bar` (horizontal bars), `line`, `area`, `pie` and `scatter`. `title` is optional, 1 to 255 characters with no carriage return, NUL or half of a surrogate pair. `stacked` stacks the series, and only a `column`, `bar` or `area` chart takes it. `series="rows"` makes each row of `source` one series; without it each column is one. No other attribute. A chart's `range` is one cell or one closed range on its own tab, top-left cell first, no `$`, within column XFD and row 9999999.
+
+What a chart shows:
+
+- The first column of `source` holds the categories (the x values on a `scatter`), and every other column is one series. With `series="rows"`, read rows for columns and columns for rows.
+- The first row holds the series names when every cell in it past the first column is text or blank and at least one is text. Otherwise the series are named by their column letters, and every row is data.
+- A category cell's shown text is its label. A series cell's number is its value; a blank or text cell is a gap. A `pie` draws only the first series, and a slice that is not a positive number is left out.
+- Rows and columns a person hid, or a filter hides, are not drawn.
 
 A rule covers places in the sheet. Inserting or deleting rows and columns moves its range and source as a formula's references move (a range whose rows are all gone removes the rule); moving or sorting rows leaves them where they are. A `when` rule's `f` is written for the range's top-left cell: its relative parts move with that corner, and its `$` parts keep naming their row or column.
+A chart's box is a picture over the cells: it keeps its size when rows or columns come or go outside it. An end past the tab's last row moves back one row for each row a step removes before a row that stays, and on one row for each row a step puts before a row that stays; rows added or removed after the last row that stays move it not at all. Columns likewise. An end whose row and every row after it a step removes is past the edge after it, and moves as such an end does.
 
-A miss, beyond the grammar: an empty block, an attribute a kind does not take, a missing attribute a kind needs, `items` not written as `JSON.stringify` writes it.
+A miss, beyond the grammar: an empty block, an attribute a kind does not take, a missing attribute a kind needs, `items` not written as `JSON.stringify` writes it, a chart rule with no `source`, a `type` not in the list, `stacked` on a `line`, `pie` or `scatter`, a `series` other than `rows`, a chart `range` that is not one cell or a closed range top-left cell first within column XFD and row 9999999, a `title` over 255 characters or holding a carriage return, NUL or half a character.
 
-Model: `sheet.rules?: Rule[]`, absent when the table has none. `Rule { id, pos, kind, range, items?: string[], source?, open?: true, test?, a?, b?, f?, style?, low?, mid?, high? }`.
+Model: `sheet.rules?: Rule[]`, absent when the table has none. `Rule { id, pos, kind, range, items?: string[], source?, open?: true, test?, a?, b?, f?, style?, low?, mid?, high?, type?, title?, stacked?: true, series?: "rows" }`.
+
+## Charts' drawings
+
+A tab's section may hold, after its table, one `figure` per chart rule that has been drawn, each on its own line, in rules order. The figure holds the last SVG the app drew for that chart. It is the app's output: no reader takes data from it, and a chart rule with no figure is one the app has not drawn yet.
+
+```
+tab      = '<section' attrs '>' '<h2 bind="name">' text '</h2>' grid {ws figure} ws '</section>'
+figure   = '<figure chart="' aval '" sap-ignore="">' drawing '</figure>'
+drawing  = '<svg' dattrs '>' {start | end | dtext} '</svg>'               at most 1,048,576 characters
+start    = '<' name dattrs '>'
+end      = '</' name '>'
+name     = 'svg' | 'g' | 'title' | 'desc' | 'rect' | 'line' | 'polyline' | 'polygon' | 'path'
+         | 'circle' | 'ellipse' | 'text' | 'tspan'
+dattrs   = {' ' dname '="' dval '"'}
+dname    = 'xmlns' | 'viewBox' | 'width' | 'height' | 'x' | 'y' | 'x1' | 'y1' | 'x2' | 'y2'
+         | 'cx' | 'cy' | 'r' | 'rx' | 'ry' | 'd' | 'points' | 'fill' | 'fill-opacity'
+         | 'stroke' | 'stroke-width' | 'stroke-opacity' | 'stroke-dasharray'
+         | 'stroke-linecap' | 'stroke-linejoin' | 'opacity' | 'transform' | 'text-anchor'
+         | 'dominant-baseline' | 'font-family' | 'font-size' | 'font-weight' | 'role'
+         | 'aria-label' | 'aria-hidden'
+dval     = {any character except '"' '<' CR NUL}
+dtext    = {any character except '<' CR NUL}
+```
+
+Further rules: a drawing is never empty, and no start tag has white space before its `>`; every element is closed by its own end tag, in order; `title` and `desc` hold text only; `&` appears only as `&amp;`, `&lt;`, `&gt;`, `&quot;` or `&nbsp;`; no value holds `url(`, `\`, `/*`, `&lt;` or `&gt;`. So a drawing holds no script, no link, no comment, no CDATA and nothing a parser reads past, and the first `</figure>` after the start tag always ends the figure.
+
+- **What the writer emits:** for each chart rule with a drawing that fits, a line feed then the figure. A drawing that does not fit is not written.
+- **What a reader does:** the room codec reads past each figure (it accepts only the `<figure chart="ID" sap-ignore="">` start tag it writes) and refuses a tab whose figure content is not a `drawing`. A host keeps the bytes as they are. ClayJS writes the live figure as the page serializer writes it, which for the drawer's output is the same bytes (ran: spike 05).
+- **Why `sap-ignore=""` and not a bare `sap-ignore`:** it is how the page serializer writes the attribute, so a figure saved by ClayJS and one written by the room codec are byte for byte the same (ran: spike 05), as the codec already writes `<section item="">` (`src/grid/room-codec.js:183`, read).
 
 ## The model
 
@@ -70,8 +110,8 @@ The model the writer takes and the reader returns (frozen at Gate A):
 // Row:   { id, pos, frozen?: true, hidden?: true, style?: string, cells: (Cell | null)[] }   trailing nulls are not stored
 // Cell:  { text: string, n?: true, t?: true, f?: string, v?: string, fmt?: string,
 //          colspan?: number, rowspan?: number, hidden?: true, style?: string }
-// Rule:  { id, pos, kind: "check" | "list" | "when" | "scale", range, items?: string[], source?, open?: true,
-//          test?, a?, b?, f?, style?, low?, mid?, high? }
+// Rule:  { id, pos, kind: "check" | "list" | "when" | "scale" | "chart", range, items?: string[], source?, open?: true,
+//          test?, a?, b?, f?, style?, low?, mid?, high?, type?, title?, stacked?: true, series?: "rows" }
 ```
 
 The reader returns `null` for a bare `<td></td>`.

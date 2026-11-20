@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { sheetCodec as codec, docOf } from "../../src/grid/room-codec.js";
+import { drawingsIn, sheetCodec as codec, docOf } from "../../src/grid/room-codec.js";
 import { modelWorkbook } from "../../src/grid/workbook-backing.js";
 import { applyWorkbook } from "../../src/grid/workbook.js";
 import { gridModel } from "../../src/grid/codec/read.js";
@@ -410,4 +410,40 @@ test("undoing a row insert on a tab with rules is accepted in a room", () => {
   expect(codec.fits(doc, out.inverse)).toBe(true);
   expect(codec.apply(doc, out.inverse).out).toBe("applied");
   expect(doc.tabs[0].sheet.rules[0].range).toBe("B2:B3");
+});
+
+test("a chart's drawing is read past, written back from drawingsIn, and refused when its figure is not the one the codec writes", () => {
+  const svg = '<svg><rect x="1"></rect></svg>';
+  const doc = book();
+  doc.tabs[0].sheet.rules = [{ id: "g", pos: "G", kind: "chart", range: "A1:B2", source: "A1:B2", type: "column" }];
+  const bytes = codec.write(doc, RECORD, { drawing: () => svg });
+  expect(bytes).toContain(`<figure chart="g" sap-ignore="">${svg}</figure>`);
+  const back = codec.read(bytes);
+  expect(back.doc.tabs[0].sheet.rules).toEqual(doc.tabs[0].sheet.rules);
+  expect(codec.write(back.doc, RECORD, { drawing: drawingsIn(bytes) })).toBe(bytes);
+  expect(codec.write(doc, RECORD)).not.toContain("<figure");
+  expect(() => codec.read(bytes.replace("<rect", "<!-- x --><rect"))).toThrow("does not read");
+  expect(() => codec.read(bytes.replace("<table grid>", `<figure chart="g" sap-ignore="">${svg}</figure><table grid>`))).toThrow();
+  expect(() => codec.read(bytes.replace('sap-ignore=""', 'onclick="x" sap-ignore=""'))).toThrow('<figure chart="ID" sap-ignore="">');
+  expect(() => codec.read(bytes.replace(' sap-ignore=""', ""))).toThrow('<figure chart="ID" sap-ignore="">');
+});
+
+test("drawingsIn reads drawings from bytes with no commit record", () => {
+  const svg = '<svg><rect x="1"></rect></svg>';
+  const first = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: budget() }, { id: "s2", name: "Notes", pos: "l", sheet: notes() }] };
+  first.tabs[0].sheet.rules = [{ id: "k1", pos: "G", kind: "chart", range: "A1:B2", source: "A1:B2", type: "column" }];
+  const written = codec.write(first, RECORD, { drawing: () => svg });
+  const bytes = written.replace(/<script type="application\/json" sheet-commit=""[^]*?<\/script>/, "").replace('</table>', "</table><p>hand edited</p>");
+  expect(bytes).not.toContain("sheet-commit");
+  expect(drawingsIn(bytes)("s1", "k1")).toBe(svg);
+  expect(drawingsIn(bytes)("s2", "k1")).toBeUndefined();
+});
+
+test("a room writes and reads back a chart id with a no-break space", () => {
+  const svg = '<svg><rect x="1"></rect></svg>';
+  const doc = book();
+  doc.tabs[0].sheet.rules = [{ id: "a\u00a0b", pos: "G", kind: "chart", range: "A1:B2", source: "A1:B2", type: "column" }];
+  const bytes = codec.write(doc, RECORD, { drawing: () => svg });
+  expect(bytes).toContain('chart="a&nbsp;b"');
+  expect(codec.read(bytes).doc.tabs[0].sheet.rules).toEqual(doc.tabs[0].sheet.rules);
 });

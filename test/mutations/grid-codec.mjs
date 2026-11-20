@@ -1,7 +1,8 @@
 // node test/mutations/grid-codec.mjs [keys-trailing-zero|codec-hidden-order|codec-group-merge|patch-keeps-hidden|
 //   writer-cells|writer-results|writer-rows|writer-cols|writer-repeated-id|writer-structure|writer-result-cells|
 //   writer-event-rows|writer-rescanned|writer-extras-swap|writer-result-flags|rules-scan|rules-shape|rules-empty|
-//   rules-items-canonical|rules-tree-content|rules-patch-tail|rules-reshape-last|rules-room-read]
+//   rules-items-canonical|rules-tree-content|rules-patch-tail|rules-reshape-last|rules-room-read|
+//   charts-balance|charts-entity|charts-box-order|charts-attributes]
 // Each entry removes one rule from the grid codec and names the test that must then
 // fail. With no argument every entry runs, one after another.
 import { mutate } from "./harness.mjs";
@@ -12,6 +13,9 @@ const WRITE = "src/grid/codec/write.js";
 const CACHED = "src/grid/codec/cached-writer.js";
 const CACHED_TEST = "test/grid-codec/cached-writer.test.js";
 const CACHED_LAW = "the cached writer writes the same bytes as tableHtml after every action of every list";
+const CHARTS = "src/grid/codec/charts.js";
+const RULES = "src/grid/codec/rules.js";
+const CHARTS_TEST = "test/grid-codec/charts.test.js";
 
 mutate({
   "keys-trailing-zero": {
@@ -219,6 +223,42 @@ mutate({
     replace: " });",
     test: "test/grid-room/codec.test.js",
     name: "a tab's rules survive a room read and write",
+    expects: /toBe|toEqual/,
+  },
+  "charts-balance": {
+    what: "a drawing's elements need not close in order, so a browser reads past the figure where the codec does not",
+    file: CHARTS,
+    find: "      if (open.at(-1) !== m[1]) return",
+    replace: "      if (false) return",
+    test: CHARTS_TEST,
+    name: "a drawing a browser would read differently is refused",
+    expects: /toBe|toEqual/,
+  },
+  "charts-entity": {
+    what: "a drawing may hold any & escape, which a browser decodes and the codec does not",
+    file: CHARTS,
+    find: "  if (ENTITY.test(html)) return",
+    replace: "  if (false) return",
+    test: CHARTS_TEST,
+    name: "a drawing a browser would read differently is refused",
+    expects: /toBe|toEqual/,
+  },
+  "charts-attributes": {
+    what: "a drawing takes any attribute a browser knows, so a saved drawing can run a script or load a link",
+    file: CHARTS,
+    find: "        if (!ATTRIBUTES.has(attr)) return",
+    replace: "        if (false) return",
+    test: CHARTS_TEST,
+    name: "a drawing a browser would read differently is refused",
+    expects: /toBe|toEqual/,
+  },
+  "charts-box-order": {
+    what: "a chart's box may be upside down or run past XFD",
+    file: RULES,
+    find: "box.left <= box.right && box.top <= box.bottom ? box : null",
+    replace: "box",
+    test: CHARTS_TEST,
+    name: "a chart box is closed, top-left first and within XFD",
     expects: /toBe|toEqual/,
   },
 });

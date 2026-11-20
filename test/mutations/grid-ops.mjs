@@ -5,6 +5,7 @@
 //   |ops-stale-unknown|ops-stale-batch-member|ops-stale-auto
 //   |rules-inverse-set|rules-validate|rules-dom-content|rules-rewrite|rules-reanchor|rules-inverse-list|rules-restore-guard|rules-anchored-abs|rules-room-revert
 //   |rules-rebound|rules-moves-stay|rules-room-refusal|rules-standalone|rules-page-undo
+//   |charts-clamp|charts-tail|charts-edge|charts-figure-tag|charts-upright|charts-rebound|charts-journal
 //   |rows-tie|rows-exists|rows-inverse-cells|rows-frozen|rows-bad-key|rows-end|rows-formula-guard
 //   |cols-shift|cols-rederive|cols-own-fmt|cols-inverse-cells
 //   |merge-inverse-content|merge-grow|merge-anchor|merge-overlap|merge-cut|freeze-cut|ops-flat-inverse
@@ -1224,7 +1225,7 @@ export const MUTATIONS = {
     find: "  if (action.t === \"rules\") return checkRules(action);",
     replace: "  if (action.t === \"rules\") return;",
     test: "test/grid/ops-merge.test.js",
-    name: "a rules action is refused when its range names another tab, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch",
+    name: "a rules action is refused when its range names another tab or runs past the sheet, its source runs past the sheet, its formula does not parse, its style is not in cleanStyle form, an id is named twice, or it is inside a batch",
     expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
   },
   "rules-dom-content": {
@@ -1333,6 +1334,69 @@ export const MUTATIONS = {
     replace: "key !== \"action\" && key !== \"restore\")",
     test: "test/grid-room/codec.test.js",
     name: "undoing a row insert on a tab with rules is accepted in a room",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-clamp": {
+    what: "a chart's box moved near column XFD is written past it, where the Grid reads a column before A",
+    file: "src/grid/workbook.js",
+    find: "${colName(Math.min(Math.max(col, 0), MAX_BOX_COL))}",
+    replace: "${colName(col)}",
+    test: "test/grid/workbook.test.js",
+    name: "a chart near column XFD stays within it",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-tail": {
+    what: "a box end whose rows all went follows the formula move past rows the step appended, so it flips",
+    file: "src/grid/workbook.js",
+    find: "  if (ids.slice(index).every((id) => !nowAt.has(id))) return index + shift;\n",
+    replace: "",
+    test: "test/grid/workbook.test.js",
+    name: "deleting the last rows under a chart does not change its size",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-upright": {
+    what: "a box whose corners the step put in the other order is read as no box at all, so its text stays upside down",
+    file: "src/grid/workbook.js",
+    find: "const endsOf = (box) => {",
+    replace: "const endsOf = (box) => { if (/^([A-Z]+)(\\d+):([A-Z]+)(\\d+)$/.test(box) && (RegExp.$2 * 1 > RegExp.$4 * 1)) return null;",
+    test: "test/grid/workbook.test.js",
+    name: "a chart beside a short table stays upright when as many rows go in above it as it is tall",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-rebound": {
+    what: "a chart whose box a step clamped keeps no inverse entry, so the undo pulls it back in from the edge",
+    file: "src/grid/workbook.js",
+    find: "  const rebound = rule.kind === \"chart\" || rebinds(",
+    replace: "  const rebound = rebinds(",
+    test: "test/grid/workbook.test.js",
+    name: "a chart clamped at column XFD comes back on undo",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-journal": {
+    what: "a rules write is journalled after it is made, so a refused step leaves the tab's rules moved",
+    file: "src/grid/workbook.js",
+    find: "  run.ruleJournal.push({ sheet: tab.id, old });\n  tab.backing.setRules(list);",
+    replace: "  tab.backing.setRules(list);\n  run.ruleJournal.push({ sheet: tab.id, old });",
+    test: "test/grid/workbook.test.js",
+    name: "a refused step leaves the tab's rules as they were",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-edge": {
+    what: "an end past the tab's last row does not move with a step's shift of the places past the edge",
+    file: "src/grid/workbook.js",
+    find: "  if (index >= ids.length) return index + shift;",
+    replace: "  if (index >= ids.length) return index;",
+    test: "test/grid/workbook.test.js",
+    name: "a chart's box past the last row keeps its size through an insert above it, grows with an insert inside it, and does not move when rows are added at the end",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "charts-figure-tag": {
+    what: "the room codec takes any figure start tag for a chart, so a figure that runs a script or does not ignore its label reads",
+    file: "src/grid/room-codec.js",
+    find: "!== `<figure chart=\"${attrEscape(figure.attrs.get(\"chart\"))}\" sap-ignore=\"\">`",
+    replace: "=== null",
+    test: "test/grid-room/codec.test.js",
+    name: "a chart's drawing is read past, written back from drawingsIn, and refused when its figure is not the one the codec writes",
     expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
   },
 };

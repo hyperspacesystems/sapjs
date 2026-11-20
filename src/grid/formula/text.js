@@ -772,6 +772,29 @@ export function topLeftOf(range) {
   return { row: rows.length > 0 ? Math.min(...rows) - 1 : 0, col: cols.length > 0 ? Math.min(...cols.map(colIndex)) : 0 };
 }
 
+// A range as a chart's source or a list's source writes it, as 0-based edges: `sheet` is the tab
+// name it names or null for its own tab, and `bottom` or `right` is null where the range is open
+// (`A2:B`, `2:5`). Null when the text is not one range.
+export function areaOf(text) {
+  if (typeof text !== "string") return null;
+  const parsed = parse(text);
+  if (parsed.error || parsed.refs.length !== 1) return null;
+  const node = parsed.refs[0];
+  if (node.span[0] !== 0 || node.span[1] !== text.length) return null;
+  const ends = node.type === "ref" ? [node, node] : [node.from, node.to];
+  const rows = ends.map((end) => (typeof end.row === "number" ? end.row - 1 : null));
+  const cols = ends.map((end) => (typeof end.col === "string" ? colIndex(end.col) : null));
+  const area = {
+    sheet: node.sheet ?? null,
+    top: rows[0] === null ? 0 : Math.min(...rows.filter((row) => row !== null)),
+    bottom: rows.includes(null) ? null : Math.max(...rows),
+    left: cols[0] === null ? 0 : Math.min(...cols.filter((col) => col !== null)),
+    right: cols.includes(null) ? null : Math.max(...cols),
+  };
+  if (area.top < 0 || (area.bottom ?? 0) > 9999998 || (area.right ?? 0) > 16383 || area.left > 16383 || area.top > 9999998) return null;
+  return area;
+}
+
 // A conditional format's formula is written for its range's top-left cell. Its relative parts mean
 // "so many rows and columns from that cell", as a fill reads them, so after a step that moved the
 // corner by `rows` and `cols` they move by as much. Its `$` parts keep naming the row or column they

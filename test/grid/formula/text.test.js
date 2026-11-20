@@ -1,4 +1,4 @@
-import { bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, moveAnchored, originalSlots, parse, print, restoreSlots, slotsOf, standard, tokenize } from "../../../src/grid/formula/text.js";
+import { areaOf, bind, cornersUnordered, frameFrom, fromIds, idsOf, lossy, moveAnchored, originalSlots, parse, print, restoreSlots, slotsOf, standard, tokenize } from "../../../src/grid/formula/text.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
 
@@ -136,4 +136,13 @@ test("moveAnchored moves relative parts with the corner and keeps $ parts on the
   expect(moveAnchored("=B$2+B3", "s1", before, after, 0, 0)).toBe("=#REF!+B3");
   expect(moveAnchored("=B3", "s1", before, after, 1, 1)).toBe("=C4");
   expect(moveAnchored("=A1", "s1", before, after, -1, 0)).toBe("=#REF!");
+});
+
+test("areaOf reads a chart source", () => {
+  expect(areaOf("A2:C")).toEqual({ sheet: null, top: 1, bottom: null, left: 0, right: 2 });
+  expect(areaOf("'Raw data'!$A$1:$B$10")).toEqual({ sheet: "Raw data", top: 0, bottom: 9, left: 0, right: 1 });
+  expect(areaOf("2:5")).toEqual({ sheet: null, top: 1, bottom: 4, left: 0, right: null });
+  expect(areaOf("A1+B1")).toBeNull();
+  for (const text of ["A0:B1", "A1:XFE1", "A1:B10000000"]) expect([text, areaOf(text)]).toEqual([text, null]);
+  expect(areaOf(undefined)).toBeNull();
 });

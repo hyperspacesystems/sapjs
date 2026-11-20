@@ -17,12 +17,13 @@
 
 import { detectDelimiter, parseDelimited, protectField, writeDelimited } from "../grid/csv.js";
 import { createSheetWriter } from "../grid/codec/cached-writer.js";
+import { drawingProblem } from "../grid/codec/charts.js";
 import { addFormatter, adjustDecimals, fmtKind, formatValue } from "../grid/format.js";
 import { addFunctions } from "../grid/formula/functions.js";
-import { tokenize } from "../grid/formula/text.js";
+import { areaOf, tokenize } from "../grid/formula/text.js";
 import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
-import { sheetCodec } from "../grid/room-codec.js";
+import { drawingsIn, sheetCodec } from "../grid/room-codec.js";
 import { MANIFEST } from "../plugin-manifest.js";
 
 const TABLE = "table[grid]";
@@ -62,6 +63,13 @@ export default {
       createSheetWriter: () => createSheetWriter(),
       // The sheet's codec for a ClayJS room: `clay.liveRoom(name, { codec: Sap.grid.roomCodec, ... })`.
       roomCodec: sheetCodec,
+      // A chart's saved drawing: why it may not be saved (null when it may), and the drawings a
+      // workbook's bytes hold, for a room save that replaces them (`roomCodec.write(doc, record,
+      // { drawing: drawingsIn(bytes) })`).
+      drawingProblem,
+      drawingsIn,
+      // A rule's `source` as 0-based edges and the tab name it names (`areaOf("Data!A2:B")`).
+      areaOf,
       // Every tab under `root` as one workbook with one formula engine (`createSheets`), each
       // table's Grid known to the plugin as `Sap.grid(table)` gives it. `extra` holds the host's
       // own options: `locale` ("de"), `quiet(fn)` for load results that changed only through

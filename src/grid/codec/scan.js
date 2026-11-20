@@ -2,7 +2,7 @@
 // which is exactly what write.js emits. Anything else is a CodecMiss, and the
 // caller reads that table with a real HTML parser instead.
 
-import { RULE_FIELDS, ruleProblem } from "./rules.js";
+import { RULE_FIELDS, RULE_FLAGS, ruleProblem } from "./rules.js";
 
 export class CodecMiss extends Error {
   constructor(message) {
@@ -167,10 +167,10 @@ function readRule(src, i) {
   rule.range = readAval(src, expect(src, cursor, ' range="'));
   i = cursor;
   for (const field of RULE_FIELDS) {
-    if (field === "open") {
-      if (flag(src, i, " open")) {
-        rule.open = true;
-        i += 5;
+    if (RULE_FLAGS.has(field)) {
+      if (flag(src, i, ` ${field}`)) {
+        rule[field] = true;
+        i += field.length + 1;
       }
       continue;
     }

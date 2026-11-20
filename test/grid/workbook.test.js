@@ -538,12 +538,114 @@ test("deleting a conditional format's top row keeps its formula on the new top r
 
 test("deleting every row of a rule removes it, and the undo brings it back", () => {
   const rule = { id: "x", pos: "V", kind: "list", range: "C3:C4", items: ["Open", "Done"] };
-  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const chart = { id: "g", pos: "W", kind: "chart", range: "A3:C4", source: "A1:C4", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule, chart]) }]);
   const out = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "3:4"));
   expect(out.out).toBe("applied");
   expect(rulesOf(wb)).toEqual([]);
   expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
-  expect(rulesOf(wb)).toEqual([rule]);
+  expect(rulesOf(wb)).toEqual([rule, chart]);
+});
+
+test("a chart's box past the last row keeps its size through an insert above it, grows with an insert inside it, and does not move when rows are added at the end", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "E2:J6", source: "A1:C5", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 5, 10) }]);
+  const above = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "1", 1, { newId: mint() }));
+  expect(above.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E3:J7");
+  expect(applyWorkbook(wb, above.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+  const inside = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "3", 1, { newId: mint() }));
+  expect(inside.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J7");
+  expect(applyWorkbook(wb, inside.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+  const end = applyWorkbook(wb, buildSet(tabOf(wb, "s1").backing, "A10", 10, { grow: true, newId: mint() }));
+  expect(end.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+  expect(applyWorkbook(wb, end.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+});
+
+test("a chart near column XFD stays within it", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "XFC2:XFD6", source: "A1:C5", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 5) }]);
+  const out = applyWorkbook(wb, buildInsertCols(tabOf(wb, "s1").backing, "A", 1, { newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFD2:XFD6");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFC2:XFD6");
+});
+
+test("a chart clamped at column XFD comes back on undo", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "XFC2:XFD6", source: "A1:C5", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 5, 5) }]);
+  const out = applyWorkbook(wb, buildInsertCols(tabOf(wb, "s1").backing, "E", 1, { newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFD2:XFD6");
+  const again = applyWorkbook(wb, buildInsertCols(tabOf(wb, "s1").backing, "E", 1, { newId: mint() }));
+  expect(again.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFD2:XFD6");
+  expect(applyWorkbook(wb, again.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFD2:XFD6");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("XFC2:XFD6");
+});
+
+test("deleting a box's top rows down to the last row does not flip it", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "E2:J6", source: "A1:C5", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 5, 10) }]);
+  const tab = tabOf(wb, "s1");
+  const remove = buildDeleteRows(tab.backing, "2:5");
+  const add = buildSet(tab.backing, "A8", 8, { grow: true, newId: mint() });
+  const out = applyWorkbook(wb, { v: 1, t: "batch", actions: [remove, add] });
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J6");
+});
+
+test("a chart beside a short table stays upright when as many rows go in above it as it is tall", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "E2:J14", source: "A1:C4", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 4, 10) }]);
+  const out = applyWorkbook(wb, buildInsertRows(tabOf(wb, "s1").backing, "1", 13, { newId: mint() }));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E15:J27");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J14");
+  const wide = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 14, 6) }]);
+  const across = applyWorkbook(wide, buildInsertCols(tabOf(wide, "s1").backing, "A", 6, { newId: mint() }));
+  expect(across.out).toBe("applied");
+  expect(rulesOf(wide)[0].range).toBe("K2:P14");
+});
+
+test("deleting the last rows under a chart does not change its size", () => {
+  const chart = { id: "g", pos: "V", kind: "chart", range: "E2:J10", source: "A1:C10", type: "column" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([chart], 10, 10) }]);
+  const out = applyWorkbook(wb, buildDeleteRows(tabOf(wb, "s1").backing, "9:10"));
+  expect(out.out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J10");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].range).toBe("E2:J10");
+});
+
+test("a refused step leaves the tab's rules as they were", () => {
+  const rule = { id: "x", pos: "V", kind: "list", range: "C2:C40", items: ["Open", "Done"] };
+  const model = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule]) }]);
+  const page = domWorkbook(rootOf(model));
+  const backing = tabOf(page, "s1").backing;
+  const before = backing.rules();
+  const write = backing.setRules;
+  let calls = 0;
+  backing.setRules = (list) => {
+    write(list);
+    calls += 1;
+    if (calls === 1) throw new Error("the writer failed");
+  };
+  const out = applyWorkbook(page, buildInsertRows(backing, "1", 1, { newId: mint() }));
+  expect([out.out, out.code]).toEqual(["refused", "rewrite_failed"]);
+  expect(calls).toBeGreaterThan(0);
+  expect(backing.rules()).toEqual(before);
 });
 
 test("renaming the tab a dropdown's source names renames the source, and the undo names it back", () => {

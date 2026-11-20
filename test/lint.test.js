@@ -1,3 +1,4 @@
+import { figureHtml } from "../src/grid/codec/charts.js";
 import { mount, Sap } from "./helpers/mount.js";
 
 function codesFor(html) {
@@ -140,5 +141,12 @@ describe("mount lint: warnings never halt", () => {
 
   test("W03 does not fire on microdata globals (itemid is near 'items')", () => {
     expect(warnsFor(`<main sap><div itemscope itemtype="x" itemid="y"><span itemprop="p">v</span></div></main>`)).not.toContain("W03");
+  });
+});
+
+describe("mount lint: a chart's figure", () => {
+  test("a figure written by figureHtml reports no error when its title holds a moustache", () => {
+    const figure = figureHtml("k6", '<svg width="10" height="10"><title>{{Jan}}</title><text x="1" y="9">Jan</text></svg>');
+    expect(codesFor(`<main sap>${figure}</main>`)).toEqual([]);
   });
 });
