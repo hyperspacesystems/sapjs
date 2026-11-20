@@ -271,13 +271,116 @@ test("an undo leaves a coworker's formula that changed only its $ locks", () => 
   expect(cell(doc, "r3", "a")).toEqual({ f: "=$B$1*2" });
 });
 
-test("undoing a one-column sort after a coworker moved a row puts nothing on the wrong rows", () => {
-  // Fails when a narrow sort's undo guards only the cells: the moved row takes another row's value.
+test("undoing a one-column sort after a coworker moved a row gives each row its own value back", () => {
+  // Fails when a narrow sort's undo is a sort back by place: the moved row takes another row's value.
   const doc = book();
   const sort = codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1"], cols: ["b"] });
   expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([10, 20, 30]);
   codec.apply(doc, { v: 1, t: "changeRows", sheet: "s1", rows: [{ id: "r2", pos: "A" }] });
   const undo = codec.apply(doc, sort.inverse);
-  expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([10, 20, 30]);
-  expect(undo.skipped).toContain("s1/r2#pos");
+  expect(undo.out).toBe("applied");
+  expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([30, 10, 20]);
+});
+
+test("undoing a sort after a coworker deleted one of its rows still puts the other rows back", () => {
+  // Fails when a sort's undo needs every row it sorted: the undo is refused and nothing comes back.
+  for (const cols of [["b"], null]) {
+    const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: table([["r1", "G", "<td>pens</td><td n>30</td>"], ["r2", "V", "<td>ink</td><td n>10</td>"], ["r3", "l", "<td>paper</td><td n>20</td>"], ["r4", "t", ""]]) }] };
+    const sort = codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1", "r4"], cols });
+    expect(codec.apply(doc, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r4"] }).out).toBe("applied");
+    expect(codec.apply(doc, sort.inverse).out).toBe("applied");
+    expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r1", "r2", "r3"]);
+    expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([30, 10, 20]);
+  }
+});
+
+test("a one-column sort's conflict shows the value it would write in each cell", () => {
+  // Fails when describe has no stored value for a sort: the dialog shows every cell blank.
+  const stored = codec.describe({ v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1"], cols: ["b"] }, book()).cells;
+  expect(Object.fromEntries(stored.map((one) => [one.target, one.stored]))).toEqual({ "s1/r1/b": 10, "s1/r2/b": 20, "s1/r3/b": 30 });
+});
+
+test("an undo of a column width keeps the width a coworker set since", () => {
+  // Fails when a changeCols undo writes a field a coworker changed: Ben's 300 goes back to the old width.
+  const doc = book();
+  const ana = codec.apply(doc, { v: 1, t: "changeCols", sheet: "s1", cols: [{ id: "b", width: 120 }] });
+  codec.apply(doc, { v: 1, t: "changeCols", sheet: "s1", cols: [{ id: "b", width: 300 }] });
+  const undo = codec.apply(doc, ana.inverse);
+  expect(undo.out).toBe("applied");
+  expect(codec.current(doc, "s1//b#width")).toBe(300);
+  expect(undo.skipped).toEqual(["s1//b#width"]);
+});
+
+test("an undo of a freeze keeps the freeze line a coworker moved since", () => {
+  // Fails when a freeze undo ignores a coworker's change: Ben's freeze through row 2 is removed.
+  const doc = book();
+  const ana = codec.apply(doc, { v: 1, t: "freeze", sheet: "s1", rowsThrough: "r1" });
+  codec.apply(doc, { v: 1, t: "freeze", sheet: "s1", rowsThrough: "r2" });
+  const undo = codec.apply(doc, ana.inverse);
+  expect(undo.out).toBe("applied");
+  expect(codec.current(doc, "s1#freezeRows")).toBe("r2");
+  expect(undo.skipped).toEqual(["s1#freezeRows"]);
+});
+
+test("an undo of a column width still happens when a coworker changed only the column's format", () => {
+  // Fails when width and format share one guard: Ana's width undo is skipped because Ben changed the format.
+  const doc = book();
+  const ana = codec.apply(doc, { v: 1, t: "changeCols", sheet: "s1", cols: [{ id: "b", width: 120 }] });
+  codec.apply(doc, { v: 1, t: "changeCols", sheet: "s1", cols: [{ id: "b", fmt: "$#,##0" }] });
+  const undo = codec.apply(doc, ana.inverse);
+  expect(undo.out).toBe("applied");
+  expect([codec.current(doc, "s1//b#width"), codec.current(doc, "s1//b#fmt")]).toEqual([null, "$#,##0"]);
+  expect(undo.skipped).toEqual([]);
+});
+
+const formulas = () => ({ tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: table([["r1", "G", '<td n>1</td><td f="=A1*2"></td>'], ["r2", "V", '<td n>2</td><td f="=A2*3"></td>'], ["r3", "l", '<td n>3</td><td f="=A3*4"></td>']]) }] });
+
+test("undoing a one-column sort of formulas after a coworker inserted a row at the top gives each formula back on its own row", () => {
+  // Fails when the undo's cell write carries formula text not bound to row ids: each formula reads the row above its own.
+  const doc = formulas();
+  const sort = codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1"], cols: ["b"] });
+  expect(codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "A" }] }).out).toBe("applied");
+  expect(codec.apply(doc, sort.inverse).out).toBe("applied");
+  expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([{ f: "=A2*2" }, { f: "=A3*3" }, { f: "=A4*4" }]);
+});
+
+test("a one-column sort's conflict shows each formula as the sort writes it", () => {
+  // Fails when describe shows the source row's formula unshifted: the dialog shows a formula the sort does not write.
+  const stored = codec.describe({ v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1"], cols: ["b"] }, formulas()).cells;
+  expect(Object.fromEntries(stored.map((one) => [one.target, one.stored]))).toEqual({ "s1/r1/b": { f: "=A1*3" }, "s1/r2/b": { f: "=A2*4" }, "s1/r3/b": { f: "=A3*2" } });
+});
+
+test("undoing a sort of rows that shared one order key after a coworker deleted a row still puts the rows back", () => {
+  // Fails when the undo leaves out a deleted row but keeps its order key: the undo is refused and the rows stay sorted.
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: table([["r1", "G", "<td>pens</td><td n>50</td>"], ["r2", "V", "<td>ink</td><td n>30</td>"], ["r3", "V", "<td>paper</td><td n>10</td>"], ["r4", "l", "<td>tape</td><td n>5</td>"]]) }] };
+  const sort = codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r3", "r2", "r1", "r4"], cols: null });
+  expect(sort.out).toBe("applied");
+  expect(codec.apply(doc, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r4"] }).out).toBe("applied");
+  expect(codec.apply(doc, sort.inverse).out).toBe("applied");
+  expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r1", "r2", "r3"]);
+});
+
+test("undoing a sort of rows that shared one order key after a coworker inserted a row among them keeps that row in its place", () => {
+  // Fails when the undo always writes the rows' old keys: they move past Ben's row, and his =B3*2 reads another row.
+  const cols = [["a", "G"], ["b", "M"], ["c", "V"]];
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "G", sheet: table([["r1", "G", "<td>pens</td><td n>50</td>"], ["r2", "d", "<td>ink</td><td n>30</td>"], ["r3", "d", "<td>paper</td><td n>10</td>"]], cols) }] };
+  const sort = codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r3", "r2", "r1"], cols: null });
+  expect(doc.tabs[0].sheet.rows.map((row) => `${row.id}@${row.pos}`)).toEqual(["r3@G", "r2@S", "r1@d"]);
+  expect(codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "rb", pos: "Y" }] }).out).toBe("applied");
+  expect(codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["rb", "b", 7], ["rb", "c", { f: "=B3*2" }]] }).out).toBe("applied");
+  expect(codec.apply(doc, sort.inverse).out).toBe("applied");
+  expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r1", "r2", "rb", "r3"]);
+  expect(cell(doc, "rb", "c")).toEqual({ f: "=B3*2" });
+});
+
+test("undoing a paste that added rows after a coworker deleted one of them puts back the cells it overwrote", () => {
+  // Fails when the undo needs every row it would delete: it is refused once Ben deleted one, and Ana's overwritten cells never come back.
+  const doc = book();
+  const paste = codec.apply(doc, { v: 1, t: "set", sheet: "s1", rows: [{ id: "r4", pos: "t" }, { id: "r5", pos: "u" }], cells: [["r2", "b", 0], ["r3", "b", 0], ["r4", "b", 0], ["r5", "b", 0]] });
+  expect(paste.out).toBe("applied");
+  expect(codec.apply(doc, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r5"] }).out).toBe("applied");
+  expect(codec.fits(doc, paste.inverse)).toBe(true);
+  expect(codec.apply(doc, paste.inverse).out).toBe("applied");
+  expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r1", "r2", "r3"]);
+  expect([cell(doc, "r1", "b"), cell(doc, "r2", "b"), cell(doc, "r3", "b")]).toEqual([30, 10, 20]);
 });

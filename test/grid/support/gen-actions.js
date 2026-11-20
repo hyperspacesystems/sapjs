@@ -448,7 +448,11 @@ function validInsertCols(rand, backing) {
     taken.add(id);
     const record = { id, pos: key.pos };
     if (chance(rand, 0.25)) record.width = 40 + pick(rand, 200);
-    if (chance(rand, 0.2)) record.fmt = pickOf(rand, FORMATS);
+    // A new column has no format to clear, so a null pick means no format.
+    if (chance(rand, 0.2)) {
+      const fmt = pickOf(rand, FORMATS);
+      if (fmt !== null) record.fmt = fmt;
+    }
     const cells = colCells(rand, backing, key.index);
     if (cells !== undefined) record.cells = cells;
     records.push(record);

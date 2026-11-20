@@ -22,7 +22,7 @@ import { scanGrid } from "./codec/scan.js";
 import { createSheetWriter } from "./codec/cached-writer.js";
 import { fnv1a, hex } from "./codec/digest.js";
 import { effectiveFmt, waitsForFormatter, contentOf } from "./content.js";
-import { fromIds, meaning, print } from "./formula/text.js";
+import { fromIds, meaning, print, shiftRows } from "./formula/text.js";
 import { isKey } from "./codec/order-keys.js";
 
 export const ROOM_CODEC_NAME = "sheet";
@@ -702,20 +702,27 @@ function filterStep(doc, action, skipped, dropped, live = null) {
     if (action.t === "moveSheet") return skipped.has(`${tabId(s)}#pos`) ? null : action;
     return action;
   }
+  // A whole-width sort's undo leaves out the rows a coworker deleted since and sorts the rest.
   if (action.t === "sort") {
-    const ids = action.cols === null ? action.rows.map((r) => `${rowId(s, r)}#pos`) : action.rows.flatMap((r) => action.cols.map((c) => cellId(s, r, c)));
-    const places = action.cols === null ? [] : action.rows.map((r) => `${rowId(s, r)}#pos`);
-    if (![...ids, ...places].some((id) => skipped.has(id))) return action;
-    dropped.push(...ids.filter((id) => !skipped.has(id)));
-    return null;
+    const keep = action.rows.flatMap((r, i) => (state.rows.has(r) ? [i] : []));
+    const ids = keep.map((i) => `${rowId(s, action.rows[i])}#pos`);
+    if (keep.length === 0 || ids.some((id) => skipped.has(id))) {
+      dropped.push(...ids.filter((id) => !skipped.has(id)));
+      return null;
+    }
+    if (keep.length === action.rows.length) return action;
+    return { ...action, rows: keep.map((i) => action.rows[i]), ...(action.pos ? { pos: keep.map((i) => action.pos[i]) } : {}) };
   }
   const made = createsOf(withoutRefs(action));
   for (const r of made.rows) state.rows.add(r);
   for (const c of made.cols) state.cols.add(c);
   const there = (r, c) => (r === null || state.rows.has(r)) && (c === null || state.cols.has(c));
   if (action.t === "deleteRows" || action.t === "deleteCols") {
-    for (const id of action.t === "deleteRows" ? action.rows : action.cols) state[action.t === "deleteRows" ? "rows" : "cols"].delete(id);
-    return action;
+    const axis = action.t === "deleteRows" ? "rows" : "cols";
+    const ids = action[axis].filter((id) => state[axis].has(id));
+    for (const id of ids) state[axis].delete(id);
+    if (ids.length === action[axis].length) return action;
+    return ids.length > 0 ? { ...action, [axis]: ids } : null;
   }
   if (action.t === "set" || action.t === "format") {
     const cells = action.cells.filter(([r, c]) => {
@@ -818,25 +825,12 @@ function freeNamed(doc, action, skipped) {
   return { ...action, sheet: { ...action.sheet, name: `${action.sheet.name} (${n})` } };
 }
 
-// What a revert's step needs: the records its parts delete (an undo of an insert), the tab, and
-// the last-tab place. Rows and columns a coworker deleted since are not needs: the cells that land
-// in them are dropped and named in `skipped`, so the rest of the undo still happens.
+// What a revert's step needs: the tab, and for a tab action its records and the last-tab place.
+// Rows and columns a coworker deleted since are not needs: the cells that land in them are dropped
+// and named in `skipped`, and a row or column the step would delete that is already gone is left
+// out of the step (ClayJS law C15 counts it removed), so the rest of the undo still happens.
 function revertNeeds(action) {
-  if (action.t === "sort" || TAB_KINDS.has(action.t)) return recordNeeds(action);
-  const s = sheetOf(action);
-  const made = { rows: new Set(), cols: new Set() };
-  const out = [tabId(s)];
-  for (const part of unpack(action)) {
-    if (part.t === "deleteRows" || part.t === "deleteCols") {
-      const axis = part.t === "deleteRows" ? "rows" : "cols";
-      for (const id of part[axis]) if (!made[axis].has(id)) out.push(axis === "rows" ? rowId(s, id) : colId(s, id));
-    } else {
-      const one = createsOf(withoutRefs(part));
-      for (const r of one.rows) made.rows.add(r);
-      for (const c of one.cols) made.cols.add(c);
-    }
-  }
-  return uniq(out);
+  return TAB_KINDS.has(action.t) ? recordNeeds(action) : [tabId(sheetOf(action))];
 }
 
 // An undo in a room. Each field the undone action wrote is put back only while it still holds what
@@ -906,8 +900,7 @@ function applyRevert(doc, action) {
 function revertOf(doc, action, step) {
   const made = action.t === "insertSheet" ? cellsOfRecord(doc, action.sheet.id, "tab").map(([id]) => id) : [];
   const sorted = action.t === "sort" && action.cols === null;
-  const places = action.t === "sort" && action.cols !== null ? action.rows.map((r) => `${rowId(action.sheet, r)}#pos`) : [];
-  return { v: 1, t: "revert", of: null, step, wrote: wroteOf(doc, frameOfDoc(doc), [...targets(action), ...(step ? targets(step.action) : []), ...made, ...places], sorted) };
+  return { v: 1, t: "revert", of: null, step, wrote: wroteOf(doc, frameOfDoc(doc), [...targets(action), ...(step ? targets(step.action) : []), ...made], sorted) };
 }
 
 function apply(doc, action) {
@@ -1165,6 +1158,18 @@ function storedOf(doc, action, target) {
   const parts = action.t === "batch" ? action.actions : [action];
   for (let i = parts.length - 1; i >= 0; i--) {
     const part = parts[i];
+    // A one-column sort writes into a row the cell of the row it puts in that row's place.
+    if (part.t === "sort" && part.cols !== null && extra === null && part.cols.includes(c)) {
+      const tab = tabIn(doc, part.sheet);
+      const was = tab ? part.rows.map((id) => rowAt(tab.sheet, id)) : [];
+      if (was.length === 0 || was.some((at) => at < 0)) continue;
+      const slots = was.slice().sort((x, y) => x - y);
+      const k = slots.indexOf(rowAt(tab.sheet, r));
+      if (k < 0) continue;
+      // The sort moves a formula as a copy moves it: shifted by the rows between its two places.
+      const stored = current(doc, cellId(part.sheet, part.rows[k], c));
+      return stored !== null && typeof stored === "object" && typeof stored.f === "string" ? { ...stored, f: shiftRows(stored.f, slots[k] - was[k]) } : stored;
+    }
     if (part.t === "set" && extra === null) {
       const entry = part.cells.find(([row, col]) => row === r && col === c);
       if (!entry) continue;

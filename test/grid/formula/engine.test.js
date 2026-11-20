@@ -4,6 +4,7 @@ import { createEngine } from "../../../src/grid/formula/engine.js";
 import { addFunctions } from "../../../src/grid/formula/functions.js";
 import { addFormatter } from "../../../src/grid/format.js";
 import { modelWorkbook } from "../../../src/grid/workbook-backing.js";
+import { gridModel } from "../../../src/grid/codec/read.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
 
@@ -483,4 +484,30 @@ describe("before the pack arrives", () => {
       engine.dispose();
     }
   });
+});
+
+test("a whole-width sort computes again a lookup on another tab whose range keeps its two end rows", () => {
+  // Fails when the engine skips a formula whose meaning did not change: the lookup keeps the old row's value.
+  const budget = gridModel('<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup>\n<tbody>\n<tr data-id="r1" data-pos="G"><td>pens</td><td n>30</td></tr>\n<tr data-id="r2" data-pos="M"><td>ink</td><td n>10</td></tr>\n<tr data-id="r3" data-pos="V"><td>paper</td><td n>20</td></tr>\n</tbody></table>', 0);
+  const sum = gridModel('<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup>\n<tbody>\n<tr data-id="x1" data-pos="G"><td f="=INDEX(Budget!B1:B3, 1)"></td><td f="=MATCH(&quot;paper&quot;, Budget!A1:A3, 0)"></td></tr>\n</tbody></table>', 0);
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "G", sheet: budget }, { id: "s2", name: "Sum", pos: "V", sheet: sum }]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect([engine.result("s2", "x1", "a"), engine.result("s2", "x1", "b")]).toEqual([30, 3]);
+  expect(applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["r3", "r2", "r1"], cols: null }, { engine }).out).toBe("applied");
+  expect([engine.result("s2", "x1", "a"), engine.result("s2", "x1", "b")]).toEqual([20, 1]);
+  engine.dispose();
+});
+
+test("a whole-width sort computes again a SUMIF on another tab whose sum range is one cell of the sorted tab", () => {
+  // Fails when only true ranges on the sorted tab compute again: the SUMIF stretches Budget!B1 to B1:B3 and keeps the old total.
+  const budget = gridModel('<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup>\n<tbody>\n<tr data-id="r1" data-pos="G"><td>pens</td><td n>1</td></tr>\n<tr data-id="r2" data-pos="M"><td>ink</td><td n>10</td></tr>\n<tr data-id="r3" data-pos="V"><td>paper</td><td n>100</td></tr>\n</tbody></table>', 0);
+  const sum = gridModel('<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup>\n<tbody>\n<tr data-id="x1" data-pos="G"><td>no</td><td f="=SUMIF(A1:A3, &quot;pick&quot;, Budget!B1)"></td></tr>\n<tr data-id="x2" data-pos="M"><td>pick</td></tr>\n<tr data-id="x3" data-pos="V"><td>no</td></tr>\n</tbody></table>', 0);
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "G", sheet: budget }, { id: "s2", name: "Summary", pos: "V", sheet: sum }]);
+  const engine = createEngine(wb);
+  engine.load();
+  expect(engine.result("s2", "x1", "b")).toBe(10);
+  expect(applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["r1", "r3", "r2"], cols: null }, { engine }).out).toBe("applied");
+  expect(engine.result("s2", "x1", "b")).toBe(100);
+  engine.dispose();
 });

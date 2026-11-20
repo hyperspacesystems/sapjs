@@ -19,7 +19,10 @@ import { genAction } from "../../grid/support/gen-actions.js";
 // left): an insert whose cells land inside a merge, a record landing among frozen rows, a merge
 // that an insert would grow across the frozen line, and a batch whose later part meets what an
 // earlier part made.
-export const RESIDUAL = new Set(["covered_cell", "bad_action", "merge_cut", "merge_stale", "exists", "missing_row", "missing_col", "merge_overlap"]);
+export const RESIDUAL = new Set(["covered_cell", "bad_action", "merge_cut", "merge_stale", "exists", "merge_overlap"]);
+// A batch's later part can name a row or column its earlier part deletes; the needs name only what
+// the batch needs from the document, so that refusal is left out for a batch alone.
+const BATCH_RESIDUAL = new Set(["missing_row", "missing_col"]);
 
 export const tally = new Map();
 const count = (key) => tally.set(key, (tally.get(key) ?? 0) + 1);
@@ -97,17 +100,22 @@ export function sample(random, { length = 8 } = {}) {
   const scratch = structuredClone(doc);
   const actions = [];
   const inverses = [];
+  // A room delivers a coworker's action built on the document as that coworker saw it, so about a
+  // third of the actions are built on the document a few actions back.
+  const history = [];
   for (let tries = 0; actions.length < length && tries < length * 20; tries++) {
-    const action = actionOf(random, scratch, inverses);
+    const stale = history.length > 0 && random() < 0.34;
+    const action = actionOf(random, stale ? pick(random, history.slice(-3)) : scratch, inverses);
     if (action === null) continue;
     const placed = codec.needs(action).every((id) => codec.has(scratch, id)) && codec.creates(action).every((id) => !codec.has(scratch, id));
     const out = codec.apply(scratch, action);
-    if (out.out !== "applied" && placed && RESIDUAL.has(out.code)) {
+    if (out.out !== "applied" && placed && (RESIDUAL.has(out.code) || (action.t === "batch" && BATCH_RESIDUAL.has(out.code)))) {
       count(`${action.t}:${out.code}`);
       continue;
     }
     count(`${action.t}:${out.out}${out.skipped?.length ? ":skipped" : ""}`);
     actions.push(action);
+    history.push(structuredClone(scratch));
     if (out.out === "applied") inverses.push(out.inverse);
   }
   return { doc, record: RECORD, actions };

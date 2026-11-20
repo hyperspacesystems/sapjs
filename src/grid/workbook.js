@@ -462,6 +462,7 @@ function runRestore(run, after, restore, { meantBefore, keysBefore }) {
 // Whole-text restores that undo what `runRestore` changed: each old text comes back while its
 // cell still means what the restore left. `home` says where the inverse finds the cell and what
 // text it had (a sort moves cells and shifts their text; any other step leaves both).
+// The undo of restores that ran in order runs them back in the reverse order: two on one cell undo the later one first.
 function undoRestores(changes, frame, home = (sid, rid, cid, old, text) => ({ row: rid, f: old, now: text })) {
   const out = [];
   for (const change of changes) {
@@ -471,7 +472,7 @@ function undoRestores(changes, frame, home = (sid, rid, cid, old, text) => ({ ro
     const left = bind(now, sid, frame);
     if (was !== null && left !== null) out.push([sid, row, cid, f, idsOf(was), { ids: idsOf(left) }]);
   }
-  return out;
+  return out.reverse();
 }
 
 // A sort: `rows` in their new order, `cols` null for the whole width (the row records move, to the
@@ -502,6 +503,15 @@ function freshTies(rows, slots, pos) {
   }
   return out;
 }
+// A sort's kept keys put its rows back only when they land in the places the rows hold now: a row a
+// coworker inserted among them since would otherwise take another row number under its formulas.
+function keepsSlots(rows, slots, ids, pos) {
+  const keyOf = new Map(ids.map((id, i) => [id, pos[i]]));
+  const order = rows.map((row) => ({ id: row.id, pos: keyOf.get(row.id) ?? row.pos, sorted: keyOf.has(row.id) }));
+  order.sort((x, y) => (x.pos !== y.pos ? (x.pos < y.pos ? -1 : 1) : x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  return order.flatMap((one, at) => (one.sorted ? [at] : [])).every((at, i) => at === slots[i]);
+}
+
 function applySort(run, action, restore) {
   const { wb, derive, computed } = run;
   if (!distinctIds(action.rows) || (action.cols !== null && !distinctIds(action.cols))) return refusal("bad_action", "a sort names distinct rows and columns");
@@ -519,7 +529,7 @@ function applySort(run, action, restore) {
   let step;
   let inverse;
   if (action.cols === null) {
-    const pos = action.pos ?? freshTies(b.rows(), slots, slots.map((at) => b.rows()[at].pos));
+    const pos = action.pos !== undefined && keepsSlots(b.rows(), slots, action.rows, action.pos) ? action.pos : freshTies(b.rows(), slots, slots.map((at) => b.rows()[at].pos));
     const minted = pos.some((key, i) => key !== b.rows()[slots[i]].pos);
     const old = action.rows.map((id, i) => ({ id, at: was[i], pos: b.rows()[was[i]].pos }));
     for (const one of old) {
@@ -538,20 +548,18 @@ function applySort(run, action, restore) {
         const c = b.colIndex(colId);
         const cell = b.cell(was[i], c);
         let content = inverseContent(cell);
-        if (content !== null && typeof content === "object") {
-          shifted.push({ row: target, back: id, col: colId, f: content.f, delta: slots[i] - was[i] });
-          content = { ...content, f: shiftRows(content.f, slots[i] - was[i]) };
-        }
+        if (content !== null && typeof content === "object") content = { ...content, f: shiftRows(content.f, slots[i] - was[i]) };
         const extra = cell ? cellExtra(cell, b.cols()[c]) : { fmt: null };
         cells.push([target, colId, content, { ...extra, css: extra.css ?? "" }]);
       }
     });
     step = { v: 1, t: "set", sheet: tab.id, cells };
-    const placed = slots.map((at) => b.rows()[at].id);
-    inverse = { v: 1, t: "sort", sheet: tab.id, rows: placed.map((id) => placed[action.rows.indexOf(id)]), cols: action.cols.slice() };
   }
   const out = apply(b, step, { derive, formulas: {}, computed });
   if (out.out !== "applied") return out;
+  // A narrow sort is undone by writing each cell's earlier content back to its own row, so a row a
+  // coworker moved or deleted since takes back its own values, or none.
+  if (action.cols !== null) inverse = bindSetInverse(out.inverse, before);
   run.undo = () => apply(b, out.inverse, { derive, formulas: {}, computed });
   for (const change of out.changes.cells) run.changed.cells.push({ ...change, sheet: tab.id });
   for (const change of out.changes.rows ?? []) run.changed.rows.push({ ...change, sheet: tab.id });

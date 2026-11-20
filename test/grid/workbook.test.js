@@ -480,3 +480,31 @@ test("a whole-width sort orders rows that share one order key, and its undo give
   expect(values()).toEqual(["50", "30", "10"]);
   expect(tableHtml(wb.sheets()[0].backing.sheet)).toBe(before);
 });
+
+test("undo, redo, undo and redo of a row delete after a coworker moved a row give the total back each time", () => {
+  // Fails when the undo of two restores on one cell runs them in the order they ran: the second redo writes the wrong range.
+  const rows = ["r1", "r2", "r3", "r4", "r5"].map((id, i) => ({ id, pos: "BCDEF"[i], cells: [null, number((i + 1) * 10)] }));
+  rows.push({ id: "r6", pos: "G", cells: [{ text: "Total" }, { text: "", f: "=SUM(B1:B3)" }] });
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: { cols: [{ id: "a", pos: "A" }, { id: "b", pos: "B" }], rows } }]);
+  const removed = applyWorkbook(wb, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r1"] });
+  applyWorkbook(wb, { v: 1, t: "changeRows", sheet: "s1", rows: [{ id: "r5", pos: "BV" }] });
+  const before = unstaled(bytes(wb));
+  const undo1 = applyWorkbook(wb, removed.inverse);
+  const redo1 = applyWorkbook(wb, undo1.inverse);
+  expect(unstaled(bytes(wb))).toBe(before);
+  const undo2 = applyWorkbook(wb, redo1.inverse);
+  applyWorkbook(wb, undo2.inverse);
+  expect(wb.sheets()[0].backing.cell(4, 1).f).toBe("=SUM(B2:B3)");
+  expect(unstaled(bytes(wb))).toBe(before);
+});
+
+test("a whole-width sort that pushes a formula above row 1 gives it back whole on undo", () => {
+  // Fails when the sort's undo has no whole-text restore: the formula stays =#REF! after the undo.
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: sheetOf("s1", 3, 2, { "0,0": { text: "a" }, "1,0": { text: "b" }, "2,1": { text: "", f: "=A1" } }) }]);
+  const before = bytes(wb);
+  const out = applyWorkbook(wb, { v: 1, t: "sort", sheet: "s1", rows: ["s1r3", "s1r1", "s1r2"], cols: null });
+  expect(out.out).toBe("applied");
+  expect(formulaAt(wb, "s1", "s1r3", "s1c2")).toBe("=#REF!");
+  expect(applyWorkbook(wb, out.inverse).out).toBe("applied");
+  expect(unstaled(bytes(wb))).toBe(unstaled(before));
+});

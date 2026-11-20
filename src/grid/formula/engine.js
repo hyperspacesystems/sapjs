@@ -692,7 +692,9 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
       for (const entry of [...formulas.values()]) {
         if (entry.floating || (renamed && entry.named) || (entry.named && entry.refs.some((ref) => sorted.has(ref.s))) || lost(entry)) {
           const again = add(entry.sheet, entry.row, entry.col, entry.f);
-          if (entry.floating || meaning(again) !== meaning(entry)) seeds.push(again.key);
+          // A range on a sorted tab, or a cell a SUMIF stretches into one, holds other rows even when
+          // its end rows are the same.
+          if (entry.floating || (entry.named && entry.refs.some((ref) => sorted.has(ref.s) && (!ref.cell || entry.stretch.size > 0))) || meaning(again) !== meaning(entry)) seeds.push(again.key);
         }
         // A stretched sum range's cells depend on the criteria range's shape, so any move on its tab
         // computes it again.
