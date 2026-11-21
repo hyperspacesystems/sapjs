@@ -690,16 +690,24 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
       };
       const renamed = changed.sheets.length > 0;
       for (const entry of [...formulas.values()]) {
+        let seeded = false;
+        let active = entry;
         if (entry.floating || (renamed && entry.named) || (entry.named && entry.refs.some((ref) => sorted.has(ref.s))) || lost(entry)) {
-          const again = add(entry.sheet, entry.row, entry.col, entry.f);
+          active = add(entry.sheet, entry.row, entry.col, entry.f);
           // A range on a sorted tab, or a cell a SUMIF stretches into one, holds other rows even when
           // its end rows are the same.
-          if (entry.floating || (entry.named && entry.refs.some((ref) => sorted.has(ref.s) && (!ref.cell || entry.stretch.size > 0))) || meaning(again) !== meaning(entry)) seeds.push(again.key);
+          if (entry.floating || (entry.named && entry.refs.some((ref) => sorted.has(ref.s) && (!ref.cell || entry.stretch.size > 0))) || meaning(active) !== meaning(entry)) {
+            seeds.push(active.key);
+            seeded = true;
+          }
         }
         // A stretched sum range's cells depend on the criteria range's shape, so any move on its tab
-        // computes it again.
-        else if ((entry.place || entry.stretch.size > 0) && (moved.has(entry.sheet) || entry.refs.some((ref) => moved.has(ref.s)))) seeds.push(entry.key);
-        else if (entry.refs.some((ref, i) => !ref.cell && !ref.dead && !ref.unbound && moved.has(ref.s) && regrouped(ref, entry.parsed.refs[i]))) seeds.push(entry.key);
+        // computes it again. Also check regrouping even when the formula was rebound above (e.g. a
+        // cross-tab formula whose tab was structurally changed via reconcile).
+        if (!seeded) {
+          if ((active.place || active.stretch.size > 0) && (moved.has(active.sheet) || active.refs.some((ref) => moved.has(ref.s)))) seeds.push(active.key);
+          else if (active.refs.some((ref, i) => !ref.cell && !ref.dead && !ref.unbound && moved.has(ref.s) && regrouped(ref, active.parsed.refs[i]))) seeds.push(active.key);
+        }
       }
     }
     for (const { sheet, row, col } of changed.cells) {

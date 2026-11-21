@@ -337,8 +337,8 @@ function cellPrint(doc, frame, s, cell) {
   return fp([contentKey(doc, frame, s, cell), cell.fmt ?? "", cell.style ?? "", cell.colspan ?? 1, cell.rowspan ?? 1].join("\u0000"));
 }
 
-const rowPrint = (row) => fp([row.pos, row.style ?? "", row.frozen ? 1 : 0].join("\u0000"));
-const colPrint = (col) => fp([col.pos, col.width ?? "", col.fmt ?? ""].join("\u0000"));
+const rowPrint = (row) => fp([row.pos, row.style ?? "", row.frozen ? 1 : 0, row.hidden ? 1 : 0].join("\u0000"));
+const colPrint = (col) => fp([col.pos, col.width ?? "", col.fmt ?? "", col.hidden ? 1 : 0].join("\u0000"));
 
 // A rule's fingerprint: its saved fields as written, and its tab's rows and columns in order. A rule
 // covers places, so any coworker change to which records sit where (an insert, a delete, a sort or a
@@ -596,6 +596,7 @@ function removes(action) {
 }
 
 function targets(action) {
+  if (!action || typeof action !== "object") return [];
   if (action.t === "revert") return action.step ? targets(action.step.action) : [];
   if (action.t === "insertSheet") return [`${tabId(action.sheet.id)}#name`, `${tabId(action.sheet.id)}#pos`];
   if (action.t === "renameSheet") return [`${tabId(action.sheet)}#name`];
@@ -880,6 +881,11 @@ function filterStep(doc, action, skipped, dropped, live = null) {
     if (!cells.some((id) => skipped.has(id))) return action;
     dropped.push(...cells.filter((id) => !skipped.has(id)));
     return null;
+  }
+  if (action.t === "unmerge") {
+    const id = cellId(s, action.row, action.col);
+    if (skipped.has(id) || !there(action.row, action.col)) return null;
+    return action;
   }
   if (action.t === "freeze") {
     const next = { v: 1, t: "freeze", sheet: s };
@@ -1290,6 +1296,15 @@ function label(doc, target, stored = null) {
   return name;
 }
 
+function decodeStoredValue(doc, sheetId, content) {
+  if (content === null || content === undefined || typeof content !== "object") return content ?? null;
+  if (typeof content.f === "string") {
+    const bound = Array.isArray(content.refs) ? fromIds(content.f, content.refs) : null;
+    return { f: bound === null ? content.f : print(bound, sheetId, null, frameOfDoc(doc)) };
+  }
+  return content;
+}
+
 // What the action stores at a target, as `current` reads it: a formula sent with ids is printed in
 // the doc's frame, as `apply` would write it. The last part of a batch to write it wins.
 function storedOf(doc, action, target) {
@@ -1319,10 +1334,33 @@ function storedOf(doc, action, target) {
     if (part.t === "set" && extra === null) {
       const entry = part.cells.find(([row, col]) => row === r && col === c);
       if (!entry) continue;
-      const content = entry[2];
-      if (content === null || typeof content !== "object") return content;
-      const bound = Array.isArray(content.refs) ? fromIds(content.f, content.refs) : null;
-      return { f: bound === null ? content.f : print(bound, part.sheet, null, frameOfDoc(doc)) };
+      return decodeStoredValue(doc, part.sheet, entry[2]);
+    }
+    if (part.t === "insertRows" && part.sheet === s && extra === null && r !== null && c !== null) {
+      const row = (part.rows ?? []).find((one) => one.id === r);
+      if (!row?.cells) continue;
+      const tab = tabIn(doc, s);
+      for (let idx = 0; idx < row.cells.length; idx++) {
+        const entry = row.cells[idx];
+        if (Array.isArray(entry)) {
+          if (entry[0] === c) return decodeStoredValue(doc, s, entry[1]);
+        } else if (tab?.sheet.cols[idx]?.id === c) {
+          return decodeStoredValue(doc, s, entry);
+        }
+      }
+    }
+    if (part.t === "insertCols" && part.sheet === s && extra === null && r !== null && c !== null) {
+      const col = (part.cols ?? []).find((one) => one.id === c);
+      if (!col?.cells) continue;
+      const tab = tabIn(doc, s);
+      for (let idx = 0; idx < col.cells.length; idx++) {
+        const entry = col.cells[idx];
+        if (Array.isArray(entry)) {
+          if (entry[0] === r) return decodeStoredValue(doc, s, entry[1]);
+        } else if (tab?.sheet.rows[idx]?.id === r) {
+          return decodeStoredValue(doc, s, entry);
+        }
+      }
     }
     if (part.t === "format" && (extra === "fmt" || extra === "style")) {
       const entry = part.cells.find(([row, col]) => row === r && col === c);
@@ -1342,14 +1380,80 @@ function storedOf(doc, action, target) {
   return null;
 }
 
+function insertedCellsOf(doc, shown) {
+  const out = [];
+  const parts = shown.t === "batch" ? shown.actions : [shown];
+  for (const part of parts) {
+    if (part.t === "insertRows") {
+      const tab = tabIn(doc, part.sheet);
+      const name = tab?.name ?? part.sheet;
+      const cols = tab?.sheet.cols ?? [];
+      for (const [rIdx, row] of (part.rows ?? []).entries()) {
+        for (const [cIdx, entry] of (row.cells ?? []).entries()) {
+          const isPair = Array.isArray(entry);
+          const colIdVal = isPair ? entry[0] : (cols[cIdx]?.id ?? `c${cIdx + 1}`);
+          const rawVal = isPair ? entry[1] : entry;
+          if (rawVal === null || rawVal === undefined || rawVal === "") continue;
+          const stored = decodeStoredValue(doc, part.sheet, rawVal);
+          const ci = isPair ? colAt(tab?.sheet ?? { cols: [], rows: [] }, colIdVal) : cIdx;
+          const target = cellId(part.sheet, row.id, colIdVal);
+          const cellLabel = ci >= 0 ? `${name}!${colName(ci)} (row ${rIdx + 1})` : label(doc, target, stored);
+          out.push({ target, label: cellLabel, stored });
+        }
+      }
+    } else if (part.t === "insertCols") {
+      const tab = tabIn(doc, part.sheet);
+      const name = tab?.name ?? part.sheet;
+      const rows = tab?.sheet.rows ?? [];
+      for (const [cIdx, col] of (part.cols ?? []).entries()) {
+        for (const [rIdx, entry] of (col.cells ?? []).entries()) {
+          const isPair = Array.isArray(entry);
+          const rowIdVal = isPair ? entry[0] : (rows[rIdx]?.id ?? `r${rIdx + 1}`);
+          const rawVal = isPair ? entry[1] : entry;
+          if (rawVal === null || rawVal === undefined || rawVal === "") continue;
+          const stored = decodeStoredValue(doc, part.sheet, rawVal);
+          const ri = isPair ? rowAt(tab?.sheet ?? { cols: [], rows: [] }, rowIdVal) : rIdx;
+          const target = cellId(part.sheet, rowIdVal, col.id);
+          const cellLabel = ri >= 0 ? `${name}!${colName(cIdx)}${ri + 1}` : label(doc, target, stored);
+          out.push({ target, label: cellLabel, stored });
+        }
+      }
+    } else if (part.t === "insertSheet") {
+      const spec = part.sheet && typeof part.sheet === "object" ? part.sheet : part;
+      const sId = typeof part.sheet === "string" ? part.sheet : (spec.id ?? "s1");
+      const sName = spec.name ?? sId;
+      const cols = spec.cols ?? [];
+      for (const [rIdx, row] of (spec.rows ?? []).entries()) {
+        const rId = row.id ?? `r${rIdx + 1}`;
+        for (const [cIdx, entry] of (row.cells ?? []).entries()) {
+          const isPair = Array.isArray(entry);
+          const colIdVal = isPair ? entry[0] : (cols[cIdx]?.id ?? `c${cIdx + 1}`);
+          const rawVal = isPair ? entry[1] : entry;
+          if (rawVal === null || rawVal === undefined || rawVal === "") continue;
+          const stored = decodeStoredValue(doc, sId, rawVal);
+          const colPos = isPair ? cols.findIndex((one) => one.id === colIdVal) : cIdx;
+          const cellLabel = `${sName}!${colName(colPos >= 0 ? colPos : cIdx)}${rIdx + 1}`;
+          out.push({ target: cellId(sId, rId, colIdVal), label: cellLabel, stored });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function describe(action, doc) {
+  if (!action || typeof action !== "object") return { title: "Edit", cells: [] };
   const shown = action.t === "revert" ? action.step?.action ?? action : action;
+  const cells = valueTargets(shown).map((target) => {
+    const stored = storedOf(doc, shown, target);
+    return { target, label: label(doc, target, stored), stored };
+  });
+  if (shown.t === "insertRows" || shown.t === "insertCols" || shown.t === "insertSheet") {
+    cells.push(...insertedCellsOf(doc, shown));
+  }
   return {
     title: TITLES[action.t] ?? "Edit",
-    cells: valueTargets(shown).map((target) => {
-      const stored = storedOf(doc, shown, target);
-      return { target, label: label(doc, target, stored), stored };
-    }),
+    cells,
   };
 }
 

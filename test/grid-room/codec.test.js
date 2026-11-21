@@ -666,3 +666,62 @@ test("drawingsIn is exposed on sheetCodec and preserves drawings alongside resul
   expect(next).toContain('<td n f="=B1+B2">40</td>');
   expect(next).toContain('<figure chart="g1" sap-ignore="">');
 });
+
+test("guarded revert skips unmerge when a peer modified or re-merged the cell", () => {
+  // X2 round 1 #3: filterStep omitted action.t === "unmerge".
+  const sheet = table(
+    [
+      ["r1", "G", "<td>pens</td><td n>30</td>"],
+      ["r2", "V", "<td>ink</td><td n>10</td>"],
+    ],
+    [["a", "G"], ["b", "V"], ["c", "z"]],
+  );
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet }] };
+  const merged = codec.apply(doc, { v: 1, t: "merge", sheet: "s1", from: ["r1", "a"], to: ["r1", "b"], clears: [["r1", "b"]] });
+  expect(merged.out).toBe("applied");
+  // Peer unmerges, changes A1, and re-merges A1:C1.
+  expect(codec.apply(doc, { v: 1, t: "unmerge", sheet: "s1", row: "r1", col: "a" }).out).toBe("applied");
+  expect(codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r1", "a", "Approved"]] }).out).toBe("applied");
+  expect(codec.apply(doc, { v: 1, t: "merge", sheet: "s1", from: ["r1", "a"], to: ["r1", "c"], clears: [] }).out).toBe("applied");
+  const undo = codec.apply(doc, merged.inverse);
+  expect(undo.skipped).toContain("s1/r1/a");
+  expect(doc.tabs[0].sheet.rows[0].cells[0].colspan).toBe(3);
+});
+
+test("digest and seen/unseen distinguish row.hidden and col.hidden", () => {
+  // X2 round 1 #10: rowPrint and colPrint omitted hidden.
+  const visible = book();
+  const hidden = book();
+  hidden.tabs[0].sheet.rows[1].hidden = true;
+  expect(codec.digest(hidden).s1).not.toBe(codec.digest(visible).s1);
+  const delRow = { v: 1, t: "deleteRows", sheet: "s1", rows: ["r2"] };
+  const sawVisible = codec.seen(visible, delRow);
+  expect(codec.unseen(hidden, delRow, sawVisible).length).toBeGreaterThan(0);
+
+  const hiddenCol = book();
+  hiddenCol.tabs[0].sheet.cols[1].hidden = true;
+  expect(codec.digest(hiddenCol).s1).not.toBe(codec.digest(visible).s1);
+  const delCol = { v: 1, t: "deleteCols", sheet: "s1", cols: ["b"] };
+  const sawCol = codec.seen(visible, delCol);
+  expect(codec.unseen(hiddenCol, delCol, sawCol).length).toBeGreaterThan(0);
+});
+
+test("describe preserves cell values for insertRows, insertSheet, and batched row restores", () => {
+  // X2 round 1 #8: describe() returned cells:[] and stored:null for inserted/restored rows.
+  const doc = book();
+  const insRow = codec.describe({ v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r9", pos: "z", cells: ["Rent", 8500] }] }, doc);
+  expect(insRow.cells.map((c) => c.stored)).toEqual(["Rent", 8500]);
+
+  const insSheet = codec.describe(
+    { v: 1, t: "insertSheet", sheet: "s9", name: "Q4", pos: "z", cols: [{ id: "c1", pos: "a" }], rows: [{ id: "r1", pos: "a", cells: ["Revenue: $120k"] }] },
+    doc,
+  );
+  expect(insSheet.cells.map((c) => c.stored)).toEqual(["Revenue: $120k"]);
+
+  const doc2 = book();
+  codec.apply(doc2, { v: 1, t: "merge", sheet: "s1", from: ["r1", "a"], to: ["r2", "a"], clears: [["r2", "a"]] });
+  const delRes = codec.apply(doc2, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r2"] });
+  const revDesc = codec.describe(delRes.inverse, doc2);
+  const b2 = revDesc.cells.find((c) => c.target === "s1/r2/b");
+  expect(b2?.stored).toBe(10);
+});
