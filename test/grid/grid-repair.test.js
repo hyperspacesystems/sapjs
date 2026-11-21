@@ -239,3 +239,75 @@ test("a repair that undoes a span over a value keeps that value even when anothe
   const shown = page.bytes().match(/>[^<]+</g).map((text) => text.slice(1, -1)).filter((text) => text.trim() !== "");
   expect([first?.source, shown.includes("D3"), page.grid.issues, page.grid.repair()]).toEqual(["repair", true, [], null]);
 });
+
+test("Repair puts a hand-edited rule right and edits work again", () => {
+  const page = live(
+    '<table grid><colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"><col data-id="c" data-pos="l"></colgroup><tbody>' +
+      '<tr data-id="r1" data-pos="G"><td n>1</td><td>a</td><td>b</td></tr>' +
+      '<tr data-id="r2" data-pos="V"><td n>2</td><td>a</td><td>b</td></tr>' +
+      '<tr data-id="r3" data-pos="l"><td n>3</td><td>a</td><td>b</td></tr>' +
+      '</tbody><template rules>\n<rule data-id="k1" data-pos="V" kind="when" range="A1:A3" test="gt" a="1" style="background-color: #fecaca"></rule>\n</template></table>',
+  );
+  const found = page.grid.issues.map((issue) => issue.code);
+  let refused = null;
+  try {
+    page.grid.set("B1", "x");
+  } catch (error) {
+    refused = error.code;
+  }
+  page.grid.repair();
+  const rule = page.grid.rules()[0].style;
+  let after = null;
+  try {
+    page.grid.set("B1", "x");
+    after = page.grid.get("B1");
+  } catch (error) {
+    after = error.code;
+  }
+  expect([found, refused, rule, page.grid.issues, after]).toEqual([
+    ["rule_invalid"],
+    "needs_repair",
+    "background-color:#fecaca",
+    [],
+    "x",
+  ]);
+  expect(page.table.innerHTML).toContain(
+    '<rule data-id="k1" data-pos="V" kind="when" range="A1:A3" test="gt" a="1" style="background-color:#fecaca"></rule>',
+  );
+});
+
+test("a rules block the editor would not write is an issue Repair rewrites", () => {
+  const body =
+    '<colgroup><col data-id="a" data-pos="G"><col data-id="b" data-pos="V"></colgroup><tbody>' +
+    '<tr data-id="r1" data-pos="G"><td n>1</td><td>a</td></tr>' +
+    '<tr data-id="r2" data-pos="V"><td n>2</td><td>b</td></tr>' +
+    "</tbody>";
+  const noIds = live(`<table grid>${body}<template rules>\n<rule kind="check" range="A1:A2"></rule>\n</template></table>`);
+  const noIdsFound = noIds.grid.issues.map((issue) => issue.code);
+  const noIdsEvent = noIds.grid.repair();
+  const noIdsAfter = [noIds.grid.issues, noIds.table.innerHTML.includes("<template")];
+
+  const attrs = live(
+    `<table grid>${body}<template rules>\n<rule kind="check" data-id="k1" data-pos="V" range="A1:A2"></rule>\n</template></table>`,
+  );
+  const attrsFound = attrs.grid.issues.map((issue) => issue.code);
+  const attrsEvent = attrs.grid.repair();
+  const attrsAfter = [attrs.grid.issues, attrs.table.innerHTML.includes('<rule data-id="k1" data-pos="V" kind="check" range="A1:A2"></rule>')];
+
+  const empty = live(`<table grid>${body}<template rules></template></table>`);
+  const emptyFound = empty.grid.issues.map((issue) => issue.code);
+  const emptyEvent = empty.grid.repair();
+  const emptyAfter = [empty.grid.issues, empty.table.innerHTML.includes("<template")];
+
+  expect([noIdsFound, noIdsEvent?.source, noIdsAfter, attrsFound, attrsEvent?.source, attrsAfter, emptyFound, emptyEvent?.source, emptyAfter]).toEqual([
+    ["rules_block"],
+    "repair",
+    [[], false],
+    ["rules_block"],
+    "repair",
+    [[], true],
+    ["rules_block"],
+    "repair",
+    [[], false],
+  ]);
+});

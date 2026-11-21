@@ -168,6 +168,31 @@ test("freeze_range", () => {
   expect(checkSheet(clean())).toEqual([]);
 });
 
+test("a rule the editor could not write, and a rule id used twice, are sheet issues", () => {
+  const model = clean();
+  model.rules = [
+    { id: "k1", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "W", kind: "check", range: "B1:B3" },
+    { id: "k2", pos: "X", kind: "when", range: "A1:A3", test: "gt", a: "1", style: "background-color: #fecaca" },
+  ];
+  expect(checkSheet(model)).toEqual([
+    { code: "rule_id_duplicate", rule: 1, id: "k1" },
+    { code: "rule_invalid", rule: 2, id: "k2" },
+  ]);
+  const kept = clean();
+  kept.rules = [{ id: "k1", pos: "V", kind: "check", range: "A1:A3" }];
+  expect(checkSheet(kept)).toEqual([]);
+});
+
+test("rules kept out of (pos, id) order are sheet issues", () => {
+  const model = clean();
+  model.rules = [
+    { id: "k2", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "G", kind: "check", range: "B1:B3" },
+  ];
+  expect(checkSheet(model)).toEqual([{ code: "rule_pos_order", rule: 1, id: "k1" }]);
+});
+
 // merged.html is a byte-for-byte codec fixture shared with the Go mirror, so it stays as written. Its last row
 // holds a rowspan="2" that runs past the end of the table: a real issue, which the repair (step R2) clamps.
 const KNOWN = [{ file: "merged.html", table: 0, issues: [{ code: "merge_past_end", row: 3, col: 0 }] }];

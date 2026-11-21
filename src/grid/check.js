@@ -1,7 +1,9 @@
 // Every structural problem in a sheet model, in a stable order: ids, then order
-// keys, then row length, then merges, then freeze. Pure: the model in, a list out.
+// keys, then row length, then merges, then freeze, then rules. Pure: the model in, a list out.
 
 import { isKey } from "./codec/order-keys.js";
+import { byRule } from "./codec/rules.js";
+import { ruleRefusal } from "./ops.js";
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -117,9 +119,24 @@ function checkFreeze(sheet, issues) {
   if (bad) issues.push({ code: "freeze_range" });
 }
 
+// A rule a rules action could not write (a hand edit the reader keeps) or a rule id used before:
+// either one makes that rule's undo, and a room, refuse. Reported after the freeze issues.
+function checkRules(sheet, issues) {
+  const seen = new Set();
+  let prev = null;
+  (sheet.rules ?? []).forEach((rule, index) => {
+    if (seen.has(rule.id)) issues.push({ code: "rule_id_duplicate", rule: index, id: rule.id });
+    else if (ruleRefusal(rule) !== null) issues.push({ code: "rule_invalid", rule: index, id: rule.id });
+    else if (prev !== null && byRule(prev, rule) >= 0) issues.push({ code: "rule_pos_order", rule: index, id: rule.id });
+    seen.add(rule.id);
+    prev = rule;
+  });
+}
+
 // Each issue is { code, row?, col?, id? }: row and col are 0-based indexes into
 // sheet.rows and sheet.cols (or the cell's position), id is the offending id when
-// there is one. An empty array means the sheet is clean.
+// there is one, and `rule` is a 0-based index into sheet.rules. An empty array means
+// the sheet is clean.
 export function checkSheet(sheet) {
   const issues = [];
   checkIds(sheet, issues);
@@ -130,5 +147,6 @@ export function checkSheet(sheet) {
   });
   checkMerges(sheet, issues);
   checkFreeze(sheet, issues);
+  checkRules(sheet, issues);
   return issues;
 }

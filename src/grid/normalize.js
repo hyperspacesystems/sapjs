@@ -3,9 +3,11 @@
 // plus one entry per thing done, in the order done.
 
 import { isKey, keysBetween } from "./codec/order-keys.js";
+import { byRule } from "./codec/rules.js";
 import { typed } from "./codec/value.js";
-import { canonStyle } from "./styles.js";
+import { canonStyle, cleanStyle } from "./styles.js";
 import { isBuiltin } from "./format.js";
+import { RULE_STYLE, ruleRefusal } from "./ops.js";
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -511,6 +513,54 @@ function fixFreeze(sheet, repairs) {
   if (changed) repairs.push({ code: "freeze_range" });
 }
 
+// Rule 8: a rule a rules action could not write is put in the form one could, or left out. Its
+// style is cleaned and kept to the rule style properties; a repeated or empty id gets a fresh one
+// (k1, k2, ...) and a bad order key a fresh one after the last good key; a rule still refused is
+// dropped. The rules end in (pos, id) order, as the backings keep them.
+function fixRules(sheet, repairs) {
+  if (!Array.isArray(sheet.rules) || sheet.rules.length === 0) return;
+  const taken = new Set(sheet.rules.map((rule) => rule.id).filter((id) => typeof id === "string" && id !== ""));
+  const seen = new Set();
+  let fresh = 1;
+  const good = sheet.rules.map((rule) => rule.pos).filter(isKey).sort();
+  const keys = keysBetween(good.at(-1) ?? null, null, sheet.rules.length);
+  let nextKey = 0;
+  const kept = [];
+  sheet.rules.forEach((rule, index) => {
+    const out = { ...rule };
+    if (typeof out.style === "string") {
+      const style = (cleanStyle(out.style) ?? "").split(";").filter((pair) => RULE_STYLE.has(pair.slice(0, pair.indexOf(":")))).join(";");
+      if (style !== out.style) {
+        repairs.push({ code: "rule_style", rule: index, id: rule.id, from: out.style, to: style });
+        out.style = style;
+      }
+    }
+    if (typeof out.id !== "string" || out.id === "" || seen.has(out.id)) {
+      while (taken.has(`k${fresh}`)) fresh++;
+      const id = `k${fresh}`;
+      taken.add(id);
+      repairs.push({ code: "rule_id_duplicate", rule: index, from: out.id, to: id });
+      out.id = id;
+    }
+    seen.add(out.id);
+    if (!isKey(out.pos)) {
+      const pos = keys[nextKey++];
+      repairs.push({ code: "rule_pos_invalid", rule: index, id: out.id, from: out.pos, to: pos });
+      out.pos = pos;
+    }
+    if (ruleRefusal(out) !== null) {
+      repairs.push({ code: "rule_dropped", rule: index, id: out.id });
+      return;
+    }
+    kept.push(out);
+  });
+  const order = kept.map((rule) => rule.id).join("\u0000");
+  kept.sort(byRule);
+  if (kept.map((rule) => rule.id).join("\u0000") !== order) repairs.push({ code: "rule_pos_order" });
+  if (kept.length > 0) sheet.rules = kept;
+  else delete sheet.rules;
+}
+
 const sameCell = (a, b) => {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -526,7 +576,7 @@ const keptValues = (cell) => {
   return kept;
 };
 
-// Rule 8: every shown cell put in normal form, with its own fmt and span left exactly as they were
+// Rule 9: every shown cell put in normal form, with its own fmt and span left exactly as they were
 // and its style in the order the engine writes.
 function normalForm(sheet, derive, repairs) {
   if (typeof derive !== "function") return;
@@ -593,6 +643,7 @@ function normalizeOnce(sheet, { derive, hiddenText }) {
   fixOrder(model, "col", repairs);
   fixOrder(model, "row", repairs);
   fixFreeze(model, repairs);
+  fixRules(model, repairs);
   normalForm(model, derive, repairs);
   return { sheet: model, repairs };
 }

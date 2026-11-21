@@ -298,8 +298,8 @@ export const MUTATIONS = {
   "grid-rescan-mirror": grid("rescan keeps the old mirror", "const differed = backing.rescan();", "const differed = true;", RESCAN),
   "grid-hidden-text": grid(
     "a hidden cell's text is not collected from the table",
-    "[...checkSheet(backing.sheet), ...hiddenText(table, backing)]",
-    "[...checkSheet(backing.sheet)]",
+    "[...checkSheet(backing.sheet), ...hiddenText(table, backing), ...rulesBlock(table, backing)]",
+    "[...checkSheet(backing.sheet), ...rulesBlock(table, backing)]",
     HIDDEN,
   ),
   "grid-same": grid("a second call for a table makes a second Grid", "  if (known !== undefined && (engine === null || engines.get(known) === engine)) return known;\n", "", "the same table gives the same Grid"),

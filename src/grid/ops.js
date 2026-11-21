@@ -372,7 +372,7 @@ function checkRecords(action) {
   }
 }
 
-const RULE_STYLE = new Set(["background-color", "color", "font-weight", "font-style", "text-decoration"]);
+export const RULE_STYLE = new Set(["background-color", "color", "font-weight", "font-style", "text-decoration"]);
 
 // One A1 reference and nothing else around it: a cell or a range, on the rule's own tab unless
 // `anyTab`.
@@ -424,6 +424,7 @@ function checkRules(action) {
   });
   action.remove.forEach((id, index) => {
     checkText(id, `remove[${index}]`);
+    if (id === "") bad(`remove[${index}]: a rule has no id`);
     once(id);
   });
 }

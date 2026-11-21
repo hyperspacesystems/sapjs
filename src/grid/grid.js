@@ -41,6 +41,7 @@ import {
 } from "./build.js";
 import { checkSheet } from "./check.js";
 import { copyRule } from "./codec/rules.js";
+import { ruleHtml } from "./codec/write.js";
 import { QueryRefused } from "./codec/read.js";
 import { cellValue, shown, typed } from "./codec/value.js";
 import { adoptFmt, contentOf, derive, effectiveFmt, waitsForFormatter } from "./content.js";
@@ -119,6 +120,21 @@ function hiddenText(table, backing) {
     found.push({ code: "hidden_text", row: backing.rowIndexOf(td.parentNode), col: columnOf(td), text });
   }
   return found.sort((a, b) => a.row - b.row || a.col - b.col);
+}
+
+// One `rules_block` issue when the table's rules block is not the one the writer would write for the
+// rules read from it: a hand-edited rule the reader left out, attributes in another order, or an
+// empty block. Both sides go through the same parser and only the rule elements are compared, so
+// the whitespace between them does not count.
+function rulesBlock(table, backing) {
+  const block = Array.from(table.children).find((part) => part.localName === "template" && part.hasAttribute("rules")) ?? null;
+  const rules = backing.rules();
+  if (block === null) return rules.length === 0 ? [] : [{ code: "rules_block" }];
+  if (rules.length === 0) return [{ code: "rules_block" }];
+  const want = table.ownerDocument.createElement("template");
+  want.innerHTML = rules.map(ruleHtml).join("");
+  const parts = (one) => Array.from(one.content.children, (part) => part.outerHTML).join("");
+  return parts(want) === parts(block) ? [] : [{ code: "rules_block" }];
 }
 
 const noRecords = () => ({ added: [], removed: [], changed: [] });
@@ -242,7 +258,7 @@ export function createGrid(table, { write = (fn) => fn(), quiet = write, mayWrit
   let issues;
 
   const check = () => {
-    issues = Object.freeze([...checkSheet(backing.sheet), ...hiddenText(table, backing)].map(Object.freeze));
+    issues = Object.freeze([...checkSheet(backing.sheet), ...hiddenText(table, backing), ...rulesBlock(table, backing)].map(Object.freeze));
   };
   check();
 
@@ -784,9 +800,12 @@ export function createGrid(table, { write = (fn) => fn(), quiet = write, mayWrit
     });
     const freeze = next.freezeCols ?? 0;
     if ((backing.sheet.freezeCols ?? 0) !== freeze) backing.setFrozen({ cols: freeze });
+    const rules = next.rules ?? [];
+    const rewrite = issues.some((issue) => issue.code === "rules_block") || JSON.stringify(backing.rules()) !== JSON.stringify(rules);
+    if (rewrite) backing.setRules(rules);
     const tidied = backing.tidy();
     check();
-    if (repairs.length === 0 && !tidied && cells.length === 0 && rows.changed.length === 0 && cols.added.length + cols.changed.length === 0) return null;
+    if (repairs.length === 0 && !tidied && !rewrite && cells.length === 0 && rows.changed.length === 0 && cols.added.length + cols.changed.length === 0) return null;
     revision += 1;
     const event = emit({ source: "repair", repairs, cells, rows, cols, structure: true });
     schedule(table);

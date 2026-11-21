@@ -1,10 +1,12 @@
 // node test/mutations/grid-ops.mjs [check-duplicate|check-shared-ids|check-tie|check-merge|check-long-row|check-short-row
 //   |normalize-first-keeps|normalize-rekey-all|normalize-content|normalize-slots|normalize-hidden-text
+//   |rules-check|rules-normalize|rules-repair-write
 //   |a1-base26|model-trailing|model-index
 //   |ops-refuse-late|ops-inverse-fmt|ops-inverse-new|ops-covered|ops-batch-atomic|ops-empty-cell|ops-validate-cr|ops-formula-stale
 //   |ops-stale-unknown|ops-stale-batch-member|ops-stale-auto
 //   |rules-inverse-set|rules-validate|rules-dom-content|rules-rewrite|rules-reanchor|rules-inverse-list|rules-restore-guard|rules-anchored-abs|rules-room-revert
-//   |rules-rebound|rules-moves-stay|rules-room-refusal|rules-standalone|rules-page-undo
+//   |rules-rebound|rules-f-rebound|rules-moves-stay|rules-room-refusal|rules-standalone|rules-page-undo
+//   |rules-order|rules-block|rules-remove-empty
 //   |charts-clamp|charts-tail|charts-edge|charts-figure-tag|charts-upright|charts-rebound|charts-journal
 //   |rows-tie|rows-exists|rows-inverse-cells|rows-frozen|rows-bad-key|rows-end|rows-formula-guard
 //   |cols-shift|cols-rederive|cols-own-fmt|cols-inverse-cells
@@ -87,6 +89,8 @@ const cellBuilders = (what, find, replace, name) => ({ what, file: BUILD, find, 
 const structureBuilders = (what, find, replace, name, expects = /toBe|toEqual/) => ({ what, file: BUILD, find, replace, test: BUILD_STRUCTURE_TEST, name, expects });
 
 const speed = (what, file, find, replace, name, expects = /toBe|toEqual/) => ({ what, file, find, replace, test: SPEED_TEST, name, expects });
+
+const REPAIR_TEST = "test/grid/grid-repair.test.js";
 
 const COST = "the cost follows the number of rows";
 const COPIES = "the sheet is copied a fixed number of times";
@@ -174,6 +178,31 @@ export const MUTATIONS = {
     "repair pairs",
     /toBe|toEqual/,
   ),
+  "rules-check": check(
+    "a rule the editor could not write is not a sheet issue",
+    "  checkRules(sheet, issues);\n",
+    "",
+    "a rule the editor could not write, and a rule id used twice, are sheet issues",
+    /toBe|toEqual/,
+  ),
+  "rules-normalize": normalize(
+    "a hand-edited rule is left as it is",
+    "  fixRules(model, repairs);\n",
+    "",
+    "a hand-edited rule is put in the form the editor writes, or dropped",
+    /toBe|toEqual/,
+  ),
+  "rules-repair-write": {
+    what: "the repair never writes the rules it put right",
+    file: "src/grid/grid.js",
+    find:
+      "    const rewrite = issues.some((issue) => issue.code === \"rules_block\") || JSON.stringify(backing.rules()) !== JSON.stringify(rules);\n    if (rewrite) backing.setRules(rules);\n",
+    replace:
+      "    const rewrite = issues.some((issue) => issue.code === \"rules_block\") || JSON.stringify(backing.rules()) !== JSON.stringify(rules);\n",
+    test: REPAIR_TEST,
+    name: "Repair puts a hand-edited rule right and edits work again",
+    expects: /toBe|toEqual/,
+  },
   "a1-base26": a1(
     "column letters roll over one short of Z, so every name past AZ is wrong",
     "    rest = Math.floor((rest - 1) / 26);",
@@ -1289,6 +1318,42 @@ export const MUTATIONS = {
     replace: "    if (sameRule(was?.rule, now?.rule)) continue;",
     test: "test/grid/workbook.test.js",
     name: "deleting the top row of an open-ended checkbox column and undoing gives the row its checkbox back",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-f-rebound": {
+    what: "a formula\u0027s binding change on a tab step is not a rebound, so the undo leaves it as the step moved it",
+    file: "src/grid/workbook.js",
+    find: ' || (rule.f !== undefined && rebinds(rule.f.slice(1), sid, before, after, out.f.slice(1)))',
+    replace: "",
+    test: "test/grid/workbook.test.js",
+    name: "undoing a tab insert keeps a conditional format\u0027s formula that names the tab",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-order": {
+    what: "rules kept out of (pos, id) order are not a sheet issue",
+    file: "src/grid/check.js",
+    find: '    else if (prev !== null && byRule(prev, rule) >= 0) issues.push({ code: "rule_pos_order", rule: index, id: rule.id });\n',
+    replace: "",
+    test: "test/grid/check.test.js",
+    name: "rules kept out of (pos, id) order are sheet issues",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-block": {
+    what: "a rules block the editor would not write is never an issue, so Repair leaves it alone",
+    file: "src/grid/grid.js",
+    find: "function rulesBlock(table, backing) {\n",
+    replace: "function rulesBlock(table, backing) {\n  return [];\n",
+    test: "test/grid/grid-repair.test.js",
+    name: "a rules block the editor would not write is an issue Repair rewrites",
+    expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
+  },
+  "rules-remove-empty": {
+    what: "a rules action takes an empty id to remove",
+    file: "src/grid/ops.js",
+    find: '    if (id === "") bad(`remove[${index}]: a rule has no id`);\n',
+    replace: "",
+    test: "test/grid-room/codec.test.js",
+    name: "a rules action removing an empty id is refused",
     expects: /expect|Expected|Received|toBe|toEqual|toThrow/,
   },
   "rules-moves-stay": {

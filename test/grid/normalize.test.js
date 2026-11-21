@@ -8,8 +8,8 @@ import { contentOf, derive } from "../../src/grid/content.js";
 import { normalizeSheet } from "../../src/grid/normalize.js";
 import { rng } from "../grid-codec/support/rng.js";
 import { damage } from "./support/damage.js";
-import { sheet } from "./support/sheets.js";
-import { keysBetween } from "../../src/grid/codec/order-keys.js";
+import { clean, sheet } from "./support/sheets.js";
+import { isKey, keysBetween } from "../../src/grid/codec/order-keys.js";
 
 global.__SAP_KEEP_CONSOLE__ = true;
 
@@ -320,4 +320,38 @@ test("a thousand rows of stacked spans repair under the bound, in linear time", 
   expect(took).toBeLessThan(1000);
   expect(repairedSheet.cols.length).toBeLessThanOrEqual(1000);
   expect(checkSheet(repairedSheet)).toEqual([]);
+});
+
+test("rules kept out of (pos, id) order come back sorted, with a rule_pos_order repair", () => {
+  const model = clean();
+  model.rules = [
+    { id: "k2", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "G", kind: "check", range: "B1:B3" },
+  ];
+  const { sheet: fixed, repairs } = normalizeSheet(model, { derive });
+  expect(fixed.rules.map((rule) => rule.id)).toEqual(["k1", "k2"]);
+  expect(repairs.map((repair) => repair.code)).toEqual(["rule_pos_order"]);
+});
+
+test("a hand-edited rule is put in the form the editor writes, or dropped", () => {
+  const model = clean();
+  model.rules = [
+    { id: "k1", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "W", kind: "check", range: "B1:B3" },
+    { id: "k2", pos: "X", kind: "when", range: "A1:A3", test: "gt", a: "1", style: "background-color: #fecaca" },
+    { id: "k3", pos: "!", kind: "check", range: "C1:C3" },
+    { id: "k4", pos: "Y", kind: "when", range: "A1:A3", test: "gt", a: "1", style: "font-size:20px" },
+  ];
+  const { sheet: fixed, repairs } = normalizeSheet(model, { derive });
+  expect(checkSheet(fixed)).toEqual([]);
+  const ids = fixed.rules.map((rule) => rule.id);
+  expect(ids).toContain("k1");
+  expect(ids).not.toContain("k4");
+  const twin = fixed.rules.find((rule) => rule.range === "B1:B3");
+  expect(["k1", "k2", "k3", "k4"]).not.toContain(twin.id);
+  expect(fixed.rules.find((rule) => rule.id === "k2").style).toBe("background-color:#fecaca");
+  expect(isKey(fixed.rules.find((rule) => rule.id === "k3").pos)).toBe(true);
+  expect(repairs.map((repair) => repair.code)).toEqual(
+    expect.arrayContaining(["rule_style", "rule_id_duplicate", "rule_pos_invalid", "rule_dropped"]),
+  );
 });
