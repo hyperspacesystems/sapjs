@@ -98,6 +98,60 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-20
+
+### Added
+
+- Pages with a `<table grid>` load the grid plugin on their own, with the table's own `freeze-cols` and `stale` attributes known before it loads.
+- A saved sheet opens as a live table. Typed edits write the cell, and saving writes the file back byte for byte.
+- The grid reads with `get`, `cell`, `input` and `issues`, writes with `set`, `setRange`, `clear`, `format` and `repair`, runs the row and column commands, and imports and exports CSV and TSV.
+- Rows and columns take a bare `hidden` attribute, and merges may run tall.
+- A batch of grid edits is one undo step, and a page undo gives back each cell a batch changed, including a cell it cleared while reformatting its column.
+- Rows stay in the writer's `thead` and 50-row `tbody` groups, and an undo puts them back in their groups.
+- `createSheetWriter()` writes the same bytes as `tableHtml` and reuses each untouched group's string. `touch()` takes a Grid change event or `apply`'s changes, plus changed formula results. `Sap.grid.createSheetWriter()` is there for the sheet shell, and `createSheetWriter` on the codec entry for Node hosts.
+- A workbook's formulas follow their cells through row inserts, deletes and moves, column steps, and tab renames, deletes and moves. A deleted cell reads `#REF!`, and a reference past the edge floats.
+- `applyWorkbook` runs one step over every tab, all or nothing, with an inverse that takes it back.
+- One engine computes every tab's results (`createSheets`, `Sap.grid.sheets`), and a step computes only the ranges whose rows or columns changed.
+- 86 functions: sums, counts, rounding, `SUMIF` and its kin, logic, `IS` functions, `ROW` and `COLUMN`, lookups (`VLOOKUP`, `HLOOKUP`, `XLOOKUP`, `LOOKUP`, `MATCH`, `INDEX`), text, dates, `SUBTOTAL`, `RAND` and `RANDBETWEEN`. Their values are checked against what Google Sheets gives.
+- `standard(f, homeId, frame)` prints a formula in standard spelling: function names, `TRUE` and `FALSE` in capitals, references from the tabs' own names.
+- `Sap.grid.tokenize` for a host's formula editor.
+- `locale` on `createGrid` and `createSheets` takes "de", "fr", "es", "pt-BR", "it" or "nl". A person types 1.234,56, 5.3.2024, WAHR and =SUMME(A1;2,5), and the table stores 1234.56, the date, TRUE and =SUM(A1,2.5), so a file saved under one locale is byte identical under any other.
+- The cell editor shows numbers, dates and formulas the way the locale types them, and Enter on an unchanged cell changes nothing.
+- CSV in a decimal-comma locale exports with ";" and local numbers and dates, and imports back unchanged.
+- `Sap.grid.sheets(root, extra)` passes a host's `locale`, `quiet`, `now` and `random`.
+- `grid-functions` adds 26 statistics and finance functions (STDEV, VAR, MODE, LARGE, SMALL, PERCENTILE, QUARTILE, RANK, CORREL, PMT, FV, PV, NPER, NPV, IRR, RATE and aliases).
+- `grid-formats` draws any number code through numfmt, kept as an optional peer so sapjs keeps zero runtime dependencies.
+- `Sap.grid.extend({ functions, formatters })` adds to the grid's own tables, with `Sap.grid.fmtKind` and `Sap.grid.adjustDecimals` for a host's format menus.
+- Opening a saved sheet before an extension pack arrives keeps each waiting formula's saved result and writes nothing. When the functions arrive the waiting formulas compute and announce. When the formatters arrive, results are drawn again, not computed, so `RAND` keeps its number.
+- `Sap.grid.roomCodec` implements ClayJS's live-room codec over a plain workbook document: it reads and writes the `[sheet-workbook]` region's bytes, sorts, undoes in a room, and carries actions over 128 operations or 63 KiB in parts.
+- An undo in a room puts back each field only while it still holds what the undone action left, skips what a coworker changed since, and names it in `skipped`.
+- A whole-width sort takes an optional `pos` (one key per row) that its undo uses to put the exact keys back.
+- A table may end with one `<template rules>` block holding a `<rule>` per checkbox column, dropdown, conditional format or color scale. A rules action adds, replaces and removes rules by id.
+- A chart is a fifth rule kind: its range is the box of cells it covers, its source the data it draws, with a type (column, bar, line, area, pie, scatter), an optional title, stacked and series by rows. Its last drawing is saved as `<figure chart sap-ignore>` after the tab's table, so a reader with no script sees it.
+- `Sap.grid` exposes `drawingProblem`, `drawingsIn` and `areaOf` for ClayJS.
+- `derived.register` receives `{ flush }` as its second argument, which runs `Sap.flush`. ClayJS calls it before a save so the file holds the latest derived paints.
+
+### Changed
+
+- A 10,000-row paste applies and undoes in about 0.1 s each, down from 19 s and 87 s.
+- Inserted and deleted rows and columns move every rule's range and source as formulas move. A move or a sort leaves rules in place, and a conditional format's formula moves with its range's top-left corner.
+- An undo puts back every rule a step changed or rebound, unless a coworker changed it since.
+- A grid without a formula engine refuses edits that would shift its rules.
+- `patchGrid` marks a table stale only when it holds a formula or a written number needs its format drawn. Text (`@`) and automatic formats count as drawn.
+- Opening a file whose results changed only through `TODAY`, `NOW`, `RAND` or `RANDBETWEEN` does not mark it unsaved (`createSheets(root, { quiet })`).
+- A typed formula with an English "," between arguments, or a "." in a decimal-comma locale, is refused with a message instead of being read as another formula.
+- A page's own url for a plugin the manifest names wins over the default address.
+- `Sap.use` while the same plugin is loading ends that load.
+- Formulas whose ranges a sort reorders, or that a `SUMIF` stretches into one, are recalculated.
+
+### Fixed
+
+- Formula results match Google Sheets where they differed: `^` groups from the right, a text of only spaces is `#VALUE!` in arithmetic, sums that cancel to rounding noise are 0, `0^-1` is `#NUM!`, `SUM("")` is `#VALUE!`, `AND()` is `#N/A`, and text functions count an emoji as one character.
+- `=SUM(B2:B)` keeps its open end through a row insert instead of becoming `=SUM(#REF!)`.
+- Rows that share one order key sort in order: an ascending sort of 50, 30, 10 shows 10, 30, 50.
+- A sort's undo writes each cell back to its own row, so a row a coworker moved or deleted takes back its own values, and a whole-width undo leaves out rows a coworker deleted.
+- A shipped plugin the engine has no address for is not fetched, so its table keeps its saved markup instead of showing E52.
+
 ## [0.10.0] - 2026-11-14
 
 ### Added
