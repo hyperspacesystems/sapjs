@@ -60,7 +60,7 @@ Each `<rule>` is one checkbox column, dropdown, conditional format or color scal
 What a chart shows:
 
 - The first column of `source` holds the categories (the x values on a `scatter`), and every other column is one series. With `series="rows"`, read rows for columns and columns for rows.
-- The first row holds the series names when every cell in it past the first column is text or blank and at least one is text. Otherwise the series are named by their column letters, and every row is data.
+- The first row holds the series names when every cell in it past the first column is text or blank and at least one is text. Otherwise the series are named Series 1, Series 2 and so on, and every row is data.
 - A category cell's shown text is its label. A series cell's number is its value; a blank or text cell is a gap. A `pie` draws only the first series, and a slice that is not a positive number is left out.
 - Rows and columns a person hid, or a filter hides, are not drawn.
 
