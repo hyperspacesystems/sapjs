@@ -536,6 +536,16 @@ test("deleting a conditional format's top row keeps its formula on the new top r
   expect([rulesOf(wb)[0].range, rulesOf(wb)[0].f]).toEqual(["A2:D10", '=$D2="Late"']);
 });
 
+test("undoing a tab insert keeps a conditional format's formula that names the tab", () => {
+  // Fails when a formula's binding change on a tab step is not a rebound.
+  const rule = { id: "w", pos: "V", kind: "when", range: "A1:A2", test: "formula", f: "=Notes!$A$1>0", style: "background-color:#fde2e1" };
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: ruled([rule], 4, 3) }]);
+  const made = applyWorkbook(wb, { v: 1, t: "insertSheet", sheet: { id: "s2", name: "Notes", pos: "C", html: tableHtml(sheetOf("s2", 2, 2)) } });
+  expect([made.out, rulesOf(wb)[0].f]).toEqual(["applied", "=Notes!$A$1>0"]);
+  expect(applyWorkbook(wb, made.inverse).out).toBe("applied");
+  expect(rulesOf(wb)[0].f).toBe("=Notes!$A$1>0");
+});
+
 test("deleting every row of a rule removes it, and the undo brings it back", () => {
   const rule = { id: "x", pos: "V", kind: "list", range: "C3:C4", items: ["Open", "Done"] };
   const chart = { id: "g", pos: "W", kind: "chart", range: "A3:C4", source: "A1:C4", type: "column" };
@@ -726,4 +736,18 @@ test("a conditional format comparing each row with the row above keeps working w
   const above = applyWorkbook(other, buildInsertRows(tabOf(other, "s1").backing, "1", 1, { newId: mint() }));
   expect(above.out).toBe("applied");
   expect(rulesOf(other)[0].f).toBe('=$D1="Late"');
+});
+
+test("a page's undo of a tab delete keeps a tab whose rule the editor could not write", () => {
+  // Fails when the room's rule check moves into `tabProblem`, which a page's own undo runs.
+  const sheet = sheetOf("s3", 2, 2, { "0,0": { text: "x" } });
+  sheet.rules = [{ id: "w", pos: "V", kind: "when", range: "A1:B2", test: "gt", a: "1", style: "font-size:20px" }];
+  const wb = modelWorkbook([{ id: "s1", name: "Budget", pos: "A", sheet: budget() }]);
+  const made = applyWorkbook(wb, { v: 1, t: "insertSheet", sheet: { id: "s3", name: "Plan", pos: "C", html: tableHtml(sheet) } });
+  expect(made.out).toBe("applied");
+  const gone = applyWorkbook(wb, { v: 1, t: "deleteSheet", sheet: "s3" });
+  expect(gone.out).toBe("applied");
+  expect(applyWorkbook(wb, gone.inverse).out).toBe("applied");
+  expect(tabOf(wb, "s3")).toBeTruthy();
+  expect(rulesOf(wb, "s3")).toEqual(sheet.rules);
 });

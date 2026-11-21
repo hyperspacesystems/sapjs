@@ -782,6 +782,11 @@ export function createEngine(wb, { derive = defaultDerive, write = (fn) => fn(),
     on,
     // A formula cell's result (an error as `{ error }`), or undefined for a cell with no formula.
     result: resultOf,
+    // Keys of formulas that call a function not loaded yet, or depend on one.
+    unresolved() {
+      const seeds = [...formulas.values()].filter(pending).map((entry) => entry.key);
+      return new Set([...dirtyFrom(seeds)].map((entry) => entry.key));
+    },
     // The parts a writer stores for a formula cell's result, or undefined: the writer's `extras`.
     extras(sheet, row, col) {
       const value = resultOf(sheet, row, col);

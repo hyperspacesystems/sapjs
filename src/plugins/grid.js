@@ -24,6 +24,7 @@ import { areaOf, tokenize } from "../grid/formula/text.js";
 import { createGrid, createSheets, newId } from "../grid/grid.js";
 import { editText, parseInput } from "../grid/input.js";
 import { drawingsIn, sheetCodec } from "../grid/room-codec.js";
+import { boundAction } from "../grid/workbook.js";
 import { MANIFEST } from "../plugin-manifest.js";
 
 const TABLE = "table[grid]";
@@ -70,6 +71,10 @@ export default {
       drawingsIn,
       // A rule's `source` as 0-based edges and the tab name it names (`areaOf("Data!A2:B")`).
       areaOf,
+      // An outgoing set or batch with every formula bound to the row and column ids it means in a
+      // workbook (`Sap.grid.sheets(root).workbook`), for a room: a peer's insert ordered first leaves it
+      // meaning the same cells. `bound(workbook, action)`.
+      bound: boundAction,
       // Every tab under `root` as one workbook with one formula engine (`createSheets`), each
       // table's Grid known to the plugin as `Sap.grid(table)` gives it. `extra` holds the host's
       // own options: `locale` ("de"), `quiet(fn)` for load results that changed only through

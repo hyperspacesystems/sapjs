@@ -141,6 +141,22 @@ function bindSetInverse(inverse, frame) {
   };
 }
 
+// An outgoing set or batch for a room, with each formula content that carries no `refs` given the
+// ids it means in the workbook as it is now, so a peer's insert or delete that the room orders first
+// leaves it meaning the same cells. Applying it here gives the same result as the action without.
+export function boundAction(wb, action) {
+  if (!action || typeof action !== "object" || (action.t !== "set" && action.t !== "batch")) return action;
+  const frame = frameOf(wb);
+  const each = (one) => {
+    if (one.t === "batch") return { ...one, actions: one.actions.map(each) };
+    if (one.t !== "set") return one;
+    const kept = one.cells.map((entry) => entry[2] !== null && typeof entry[2] === "object" && "refs" in entry[2]);
+    const bound = bindSetInverse(one, frame);
+    return { ...one, cells: bound.cells.map((entry, i) => (kept[i] ? one.cells[i] : entry)) };
+  };
+  return each(action);
+}
+
 // The formulas of the rows and columns an action deletes, before it runs: the reverse action brings
 // their cells back as A1 text of the old frame, so the restore list holds them too.
 function deletedFormulas(wb, action) {
@@ -353,7 +369,7 @@ function moveRule(rule, sid, before, after, tabStep) {
     const now = topLeftOf(range);
     out.f = tabStep ? moveFormula(rule.f, sid, before, after) : moveAnchored(rule.f, sid, before, after, now.row - was.row, now.col - was.col);
   }
-  const rebound = rule.kind === "chart" || rebinds(rule.range, sid, before, after, range) || (rule.source !== undefined && rebinds(rule.source, sid, before, after, out.source));
+  const rebound = rule.kind === "chart" || rebinds(rule.range, sid, before, after, range) || (rule.source !== undefined && rebinds(rule.source, sid, before, after, out.source)) || (rule.f !== undefined && rebinds(rule.f.slice(1), sid, before, after, out.f.slice(1)));
   const same = out.range === rule.range && out.source === rule.source && out.f === rule.f;
   return { rule: same ? rule : out, rebound };
 }

@@ -3,7 +3,7 @@
  */
 import { drawingsIn, sheetCodec as codec, docOf } from "../../src/grid/room-codec.js";
 import { modelWorkbook } from "../../src/grid/workbook-backing.js";
-import { applyWorkbook } from "../../src/grid/workbook.js";
+import { applyWorkbook, boundAction } from "../../src/grid/workbook.js";
 import { gridModel } from "../../src/grid/codec/read.js";
 import { tableHtml } from "../../src/grid/codec/write.js";
 import { keysBetween } from "../../src/grid/codec/order-keys.js";
@@ -446,4 +446,223 @@ test("a room writes and reads back a chart id with a no-break space", () => {
   const bytes = codec.write(doc, RECORD, { drawing: () => svg });
   expect(bytes).toContain('chart="a&nbsp;b"');
   expect(codec.read(bytes).doc.tabs[0].sheet.rules).toEqual(doc.tabs[0].sheet.rules);
+});
+
+// Rules edited in a live room, sent by their places: a rule is its A1 text, with no ids.
+const fiveRows = () => table(Array.from({ length: 5 }, (_, i) => [`r${i + 1}`, "GMSVY"[i], `<td>${i}</td><td n>${i}</td>`]));
+const ruleText = (doc) => (doc.tabs[0].sheet.rules ?? []).map((rule) => `${rule.id}:${rule.kind}:${rule.range}`);
+
+test("a coworker can add, change and remove a rule in a room, and undo each", () => {
+  // Fails when `validate` refuses a rules action.
+  const doc = book();
+  const check = { v: 1, t: "rules", sheet: "s1", set: [{ id: "k1", pos: "V", kind: "check", range: "B2:B4" }], remove: [] };
+  expect([codec.validate(check), codec.fits(doc, check)]).toEqual([true, true]);
+  const added = codec.apply(doc, check);
+  expect([added.out, ruleText(doc)]).toEqual(["applied", ["k1:check:B2:B4"]]);
+  expect([codec.apply(doc, added.inverse).out, ruleText(doc)]).toEqual(["applied", []]);
+
+  codec.apply(doc, check);
+  const changed = codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [{ id: "k1", pos: "V", kind: "list", range: "B2:B4", items: ["Open", "Done"] }], remove: [] });
+  expect([changed.out, ruleText(doc)]).toEqual(["applied", ["k1:list:B2:B4"]]);
+  expect([codec.apply(doc, changed.inverse).skipped, ruleText(doc)]).toEqual([[], ["k1:check:B2:B4"]]);
+
+  const removed = codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [], remove: ["k1"] });
+  expect([removed.out, ruleText(doc)]).toEqual(["applied", []]);
+  expect([codec.apply(doc, removed.inverse).skipped, ruleText(doc)]).toEqual([[], ["k1:check:B2:B4"]]);
+});
+
+test("undoing a rule edit after a coworker's sort is skipped and named", () => {
+  // Fails when a rule's print does not change on a sort.
+  const doc = book();
+  const rule = { id: "w1", pos: "V", kind: "when", range: "A2:A5", test: "gt", a: "10", style: "background-color:#fecaca" };
+  const added = codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [rule], remove: [] });
+  expect([added.out, ruleText(doc)]).toEqual(["applied", ["w1:when:A2:A5"]]);
+  expect(codec.apply(doc, { v: 1, t: "sort", sheet: "s1", rows: ["r2", "r3", "r1"], cols: null }).out).toBe("applied");
+  expect(doc.tabs[0].sheet.rows.map((row) => row.id)).toEqual(["r2", "r3", "r1"]);
+  const undo = codec.apply(doc, added.inverse);
+  expect([undo.out, undo.skipped, ruleText(doc)]).toEqual(["applied", ["s1#rule:w1"], ["w1:when:A2:A5"]]);
+});
+
+test("undoing a rule removal after a coworker's insert above it is skipped, not put on other rows", () => {
+  // Fails when a revert puts a rule back after the tab's rows moved.
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: fiveRows() }] };
+  doc.tabs[0].sheet.rules = [{ id: "k1", pos: "V", kind: "check", range: "A2:A4" }];
+  const removed = codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [], remove: ["k1"] });
+  expect([removed.out, ruleText(doc)]).toEqual(["applied", []]);
+  expect(codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "8" }] }).out).toBe("applied");
+  const undo = codec.apply(doc, removed.inverse);
+  expect([undo.out, undo.skipped, ruleText(doc)]).toEqual(["applied", ["s1#rule:k1"], []]);
+});
+
+test("undoing a row delete after a coworker's insert does not put its rule on other rows", () => {
+  // Fails when a revert's rule restores are not guarded.
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: fiveRows() }] };
+  doc.tabs[0].sheet.rules = [{ id: "k1", pos: "V", kind: "check", range: "B2" }];
+  const deleted = codec.apply(doc, { v: 1, t: "deleteRows", sheet: "s1", rows: ["r2"] });
+  expect([deleted.out, ruleText(doc)]).toEqual(["applied", []]);
+  expect(codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "8" }] }).out).toBe("applied");
+  const undo = codec.apply(doc, deleted.inverse);
+  expect([undo.out, undo.skipped, ruleText(doc), doc.tabs[0].sheet.rows.map((row) => row.id).includes("r2")]).toEqual([
+    "applied",
+    ["s1#rule:k1"],
+    [],
+    true,
+  ]);
+});
+
+test("undoing a rule edit after a coworker's insert above it is skipped and named", () => {
+  // Fails when a revert skips nothing: a rule that moved is no longer what the edit left.
+  const doc = { tabs: [{ id: "s1", name: "Budget", pos: "V", sheet: fiveRows() }] };
+  const added = codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [{ id: "k1", pos: "V", kind: "check", range: "A2:A5" }], remove: [] });
+  expect([added.out, ruleText(doc)]).toEqual(["applied", ["k1:check:A2:A5"]]);
+  expect(codec.apply(doc, { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "8" }] }).out).toBe("applied");
+  expect(ruleText(doc)).toEqual(["k1:check:A3:A6"]);
+  const undo = codec.apply(doc, added.inverse);
+  expect([undo.out, undo.skipped, ruleText(doc)]).toEqual(["applied", ["s1#rule:k1"], ["k1:check:A3:A6"]]);
+});
+
+test("a room refuses a tab holding a rule a rules action could not write", () => {
+  // Fails when a room reads or inserts a tab whose rules a rules action could not write.
+  const fixed = book();
+  fixed.tabs[0].sheet.rules = [{ id: "w", pos: "V", kind: "when", range: "A1:B2", test: "gt", a: "1", style: "font-size:20px" }];
+  expect(() => codec.read(codec.write(fixed, RECORD))).toThrow("rule.style");
+  const twice = book();
+  twice.tabs[0].sheet.rules = [
+    { id: "k1", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "l", kind: "check", range: "B1:B3" },
+  ];
+  expect(() => codec.read(codec.write(twice, RECORD))).toThrow('two rules are "k1"');
+  const tab = (sheet) => ({ v: 1, t: "insertSheet", sheet: { id: "t1", name: "Tab", pos: "V", html: tableHtml(sheet) } });
+  expect(codec.validate(tab(fixed.tabs[0].sheet))).toBe(false);
+  const clean = book();
+  clean.tabs[0].sheet.rules = [{ id: "k1", pos: "V", kind: "check", range: "A1:A3" }];
+  expect(codec.validate(tab(clean.tabs[0].sheet))).toBe(true);
+});
+
+test("a room refuses a tab whose rules are out of order", () => {
+  // Fails when a room keeps rules that a rule edit's undo could not name.
+  const doc = book();
+  doc.tabs[0].sheet.rules = [
+    { id: "k2", pos: "V", kind: "check", range: "A1:A3" },
+    { id: "k1", pos: "G", kind: "check", range: "B1:B3" },
+  ];
+  expect(() => codec.read(codec.write(doc, RECORD))).toThrow('rules out of order at "k1"');
+  const tab = { v: 1, t: "insertSheet", sheet: { id: "t1", name: "Tab", pos: "V", html: tableHtml(doc.tabs[0].sheet) } };
+  expect(codec.validate(tab)).toBe(false);
+});
+
+test("a rules action removing an empty id is refused", () => {
+  // Fails when `remove` takes an empty id.
+  expect(codec.validate({ v: 1, t: "rules", sheet: "s1", set: [], remove: [""] })).toBe(false);
+});
+
+test("the conflict dialog names a rule by its kind and range", () => {
+  // Fails when a rule's label is its id rather than its kind and range.
+  const doc = book();
+  const described = codec.describe(
+    {
+      v: 1,
+      t: "rules",
+      sheet: "s1",
+      set: [
+        { id: "k2", pos: "V", kind: "list", range: "B2:B9", items: ["Open", "Done"] },
+        { id: "g1", pos: "l", kind: "chart", range: "A1:B2", source: "A1:B2", type: "column", title: "Sales" },
+      ],
+      remove: [],
+    },
+    doc,
+  );
+  expect(described.cells.map((cell) => cell.label)).toEqual(["Budget: Dropdown B2:B9", "Budget: Sales"]);
+});
+
+test("a formula sent bound keeps its cells when a coworker's row insert is ordered first", () => {
+  // Fails when `boundAction` leaves a formula without refs: the room reads =B1+B2 in the new rows.
+  const page = modelWorkbook(book().tabs);
+  const typed = { v: 1, t: "batch", actions: [{ v: 1, t: "set", sheet: "s1", cells: [["r3", "a", { f: "=B1+B2" }], ["r3", "b", 5]] }] };
+  const sent = boundAction(page, typed);
+  expect(sent.actions[0].cells[1]).toEqual(["r3", "b", 5]);
+  const local = modelWorkbook(book().tabs);
+  applyWorkbook(local, sent);
+  const plain = modelWorkbook(book().tabs);
+  applyWorkbook(plain, typed);
+  expect(docOf(local)).toEqual(docOf(plain));
+  const insert = { v: 1, t: "insertRows", sheet: "s1", rows: [{ id: "r0", pos: "A" }] };
+  const room = book();
+  codec.apply(room, insert);
+  expect(codec.apply(room, sent).out).toBe("applied");
+  expect(cell(room, "r3", "a")).toEqual({ f: "=B2+B3" });
+  const unbound = book();
+  codec.apply(unbound, insert);
+  codec.apply(unbound, typed);
+  expect(cell(unbound, "r3", "a")).toEqual({ f: "=B1+B2" });
+});
+
+test("a formula already sent with refs is left as its author bound it", () => {
+  // Fails when `boundAction` binds again over refs the author gave.
+  const page = modelWorkbook(book().tabs);
+  const refs = [["s1", "r2", "b", "r2", "b"]];
+  const action = { v: 1, t: "set", sheet: "s1", cells: [["r3", "a", { f: "=B1", refs }]] };
+  expect(boundAction(page, action).cells[0][2].refs).toBe(refs);
+});
+
+test("the digest changes with a tab's content and not with another tab's", () => {
+  // Fails when the digest leaves out cell content, or prints every tab the same.
+  const doc = book();
+  const before = codec.digest(doc);
+  expect(Object.keys(before)).toEqual(["s1", "s2"]);
+  expect(codec.digest(book())).toEqual(before);
+  codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r2", "b", 11]] });
+  const after = codec.digest(doc);
+  expect(after.s1).not.toBe(before.s1);
+  expect(after.s2).toBe(before.s2);
+  codec.apply(doc, { v: 1, t: "rules", sheet: "s2", set: [{ id: "k1", pos: "V", kind: "check", range: "A1:A1" }], remove: [] });
+  expect(codec.digest(doc).s2).not.toBe(after.s2);
+});
+
+test("results computes formula cells without a DOM so a host commit writes values instead of stale", () => {
+  // Fails when `results` returns nothing or omits the calculated number: the written table keeps `stale`.
+  const doc = book();
+  codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r3", "b", { f: "=SUM(B1:B2)" }]] });
+  const withoutExtras = codec.write(doc, { v: 2, commit: "c1" });
+  expect(withoutExtras).toContain("<table grid stale>");
+  const withResults = codec.write(doc, { v: 2, commit: "c1" }, codec.results(doc));
+  expect(withResults).not.toContain("<table grid stale>");
+  expect(withResults).toContain('<td n f="=SUM(B1:B2)">40</td>');
+  // Round-trip via read keeps the exact model.
+  expect(codec.digest(codec.read(withResults).doc)).toEqual(codec.digest(doc));
+});
+
+test("results leaves a tab stale when a formula calls an unloaded function or reads one", () => {
+  // Fails when an unloaded function's `#NAME?` is written as final and clears `stale`.
+  const doc = book();
+  codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r3", "b", { f: "=NOT_LOADED_FN(B1)" }]] });
+  codec.apply(doc, { v: 1, t: "set", sheet: "s2", cells: [["x1", "b", { f: "=Budget!B3+1" }]] });
+  const extras = codec.results(doc);
+  expect(extras("s1", "r3", "b")).toBeUndefined();
+  expect(extras("s2", "x1", "b")).toBeUndefined();
+  const html = codec.write(doc, { v: 2, commit: "c1" }, extras);
+  const staleCount = (html.match(/<table grid stale>/g) ?? []).length;
+  expect(staleCount).toBe(2);
+});
+
+test("results handles volatile functions via quiet without mutating the input doc", () => {
+  const doc = book();
+  codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r3", "b", { f: "=TODAY()" }]] });
+  const snap = JSON.stringify(doc);
+  const fixedNow = () => new Date(Date.UTC(2026, 10, 20));
+  const extras = codec.results(doc, { now: fixedNow });
+  expect(extras("s1", "r3", "b")).toBeDefined();
+  expect(JSON.stringify(doc)).toBe(snap);
+});
+
+test("drawingsIn is exposed on sheetCodec and preserves drawings alongside results", () => {
+  const doc = book();
+  codec.apply(doc, { v: 1, t: "set", sheet: "s1", cells: [["r3", "b", { f: "=B1+B2" }]] });
+  codec.apply(doc, { v: 1, t: "rules", sheet: "s1", set: [{ id: "g1", pos: "V", kind: "chart", range: "A1:B2", source: "A1:B2", type: "column", title: "Sales" }], remove: [] });
+  const prev = codec.write(doc, { v: 2, commit: "c1" }, { drawing: (s, id) => (s === "s1" && id === "g1" ? '<svg viewBox="0 0 10 10"><rect width="10" height="10"></rect></svg>' : undefined) });
+  expect(prev).toContain('<figure chart="g1" sap-ignore="">');
+  const next = codec.write(doc, { v: 2, commit: "c2" }, { result: codec.results(doc), drawing: codec.drawingsIn(prev) });
+  expect(next).not.toContain("<table grid stale>");
+  expect(next).toContain('<td n f="=B1+B2">40</td>');
+  expect(next).toContain('<figure chart="g1" sap-ignore="">');
 });

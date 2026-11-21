@@ -21,8 +21,11 @@ import { boxesApart, clearedBetween, cutsFrozen, mergeBoxes, needs as needsOf, c
 import { scanGrid } from "./codec/scan.js";
 import { createSheetWriter } from "./codec/cached-writer.js";
 import { chartsHtml, drawingProblem } from "./codec/charts.js";
+import { byRule, copyRule } from "./codec/rules.js";
+import { gridModel } from "./codec/read.js";
 import { fnv1a, hex } from "./codec/digest.js";
 import { effectiveFmt, waitsForFormatter, contentOf } from "./content.js";
+import { createEngine } from "./formula/engine.js";
 import { fromIds, meaning, print, shiftRows } from "./formula/text.js";
 import { isKey } from "./codec/order-keys.js";
 
@@ -64,6 +67,7 @@ const tabId = (s) => esc(s);
 const rowId = (s, r) => `${esc(s)}/${r}`;
 const colId = (s, c) => `${esc(s)}//${c}`;
 const cellId = (s, r, c) => `${esc(s)}/${r}/${c}`;
+const ruleId = (s, id) => `${esc(s)}#rule:${id}`;
 
 export function parseId(id) {
   const hash = id.indexOf("#");
@@ -249,6 +253,8 @@ function read(bytes) {
         throw new Error(`sheet codec: tab ${JSON.stringify(id)}: ${error.message}`);
       }
       delete sheet.stale;
+      const rulesProblem = roomRulesProblem(sheet.rules);
+      if (rulesProblem !== null) throw new Error(`sheet codec: tab ${JSON.stringify(id)}: ${rulesProblem}`);
       at = space(src, at);
       // A chart's drawing after the table is the app's output, not the room's: it is passed over.
       for (let figure = startTag(src, at); figure?.name === "figure" && figure.attrs.has("chart"); figure = startTag(src, at)) {
@@ -334,6 +340,12 @@ function cellPrint(doc, frame, s, cell) {
 const rowPrint = (row) => fp([row.pos, row.style ?? "", row.frozen ? 1 : 0].join("\u0000"));
 const colPrint = (col) => fp([col.pos, col.width ?? "", col.fmt ?? ""].join("\u0000"));
 
+// A rule's fingerprint: its saved fields as written, and its tab's rows and columns in order. A rule
+// covers places, so any coworker change to which records sit where (an insert, a delete, a sort or a
+// move) changes it, and an undo that would put a rule back by A1 text is skipped and named.
+const rulePrint = (sheet, rule) =>
+  fp([rule ? JSON.stringify(copyRule(rule)) : "~none", sheet.rows.map((row) => row.id).join(","), sheet.cols.map((col) => col.id).join(",")].join("\u0000"));
+
 // One target's value as a fingerprint: what `seen` records and `conflicts` compares.
 function targetPrint(doc, frame, target) {
   const { sheet: s, row: r, col: c, extra } = parseId(target);
@@ -356,6 +368,10 @@ function targetPrint(doc, frame, target) {
     const col = tab.sheet.cols[colAt(tab.sheet, c)];
     return col ? fp(`${extra}:${col[extra] ?? ""}`) : fp("~gone");
   }
+  if (extra !== null && extra.startsWith("rule:")) {
+    const found = (tab.sheet.rules ?? []).find((one) => one.id === extra.slice(5)) ?? null;
+    return rulePrint(tab.sheet, found);
+  }
   if (extra === "name") return fp(tab.name);
   if (extra === "pos") return fp(tab.pos);
   return WROTE_KINDS[extra === "freezeCols" ? "freeze:cols" : "freeze:rows"](tab);
@@ -365,6 +381,15 @@ function targetPrint(doc, frame, target) {
 // Actions: shapes
 
 const text = (value) => typeof value === "string";
+function cleanRuleId(value) {
+  if (typeof value !== "string" || value === "" || value.includes("\0") || value.includes("\r")) return false;
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && (value.charCodeAt(i + 1) & 0xfc00) === 0xdc00) i += 1;
+    else if (c >= 0xd800 && c <= 0xdfff) return false;
+  }
+  return true;
+}
 const isRef = (ref) =>
   ref === null ||
   (Array.isArray(ref) && ((ref.length === 2 && ref[0] === "~" && text(ref[1])) || (ref.length === 5 && text(ref[0]) && ref.slice(1).every((id) => id === null || id === 0 || (text(id) && ID.test(id))))));
@@ -423,6 +448,7 @@ const isWrote = (entry) => {
   const [, r, c, kind] = entry;
   const has = (id, want) => (want ? text(id) && ID.test(id) : id === null);
   if (kind === "cell") return has(r, true) && has(c, true);
+  if (text(kind) && kind.startsWith("rule:")) return cleanRuleId(kind.slice(5)) && has(r, false) && has(c, false);
   if (kind === "sort:row" || (text(kind) && kind.startsWith("row:"))) return kind in WROTE_KINDS || kind === "sort:row" ? has(r, true) && has(c, false) : false;
   if (!(kind in WROTE_KINDS)) return false;
   return kind.startsWith("col:") ? has(r, false) && has(c, true) : has(r, false) && has(c, false);
@@ -440,14 +466,37 @@ function validRevert(action) {
   return step.action?.t !== "revert" && validate(step.action);
 }
 
+// Rules a room keeps: each one a rules action could write, no id twice. A room's doc holds
+// only such rules (`read` refuses others), so an inserted tab must too; a page's own undo of a tab
+// delete does not go through here.
+function roomRulesProblem(rules) {
+  const seen = new Set();
+  let prev = null;
+  for (const rule of rules ?? []) {
+    const problem = ruleRefusal(rule);
+    if (problem !== null) return problem;
+    if (seen.has(rule.id)) return `two rules are ${JSON.stringify(rule.id)}`;
+    if (prev !== null && byRule(prev, rule) >= 0) return `rules out of order at ${JSON.stringify(rule.id)}`;
+    seen.add(rule.id);
+    prev = rule;
+  }
+  return null;
+}
+
+function insertedRules(action) {
+  try {
+    return gridModel(action.sheet.html, 0).rules ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function validate(action) {
   if (!action || typeof action !== "object" || Array.isArray(action) || action.v !== 1) return false;
   try {
-    // A rules action travels in a room once the room codec knows its targets (S8c).
-    if (action.t === "rules") return false;
     if (action.t === "revert") return validRevert(action);
     if (action.t === "sort") return validSort(action);
-    if (TAB_KINDS.has(action.t)) return Object.keys(action).every((key) => TAB_FIELDS[action.t].includes(key)) && tabProblem(action) === null;
+    if (TAB_KINDS.has(action.t)) return Object.keys(action).every((key) => TAB_FIELDS[action.t].includes(key)) && tabProblem(action) === null && (action.t !== "insertSheet" || roomRulesProblem(insertedRules(action)) === null);
     validateOne(withoutRefs(action));
     return true;
   } catch {
@@ -467,6 +516,7 @@ function reducerTargets(action) {
       if (a === "row") return field === "exists" ? rowId(s, b) : `${rowId(s, b)}#${field}`;
       if (a === "col") return field === "exists" ? colId(s, b) : `${colId(s, b)}#${field}`;
       if (a === "table") return `${tabId(s)}#${field}`;
+      if (a === "rule") return ruleId(s, b);
       if (field === "content") return cellId(s, a, b);
       return `${cellId(s, a, b)}#${field.startsWith("style") ? "style" : field}`;
     }),
@@ -676,6 +726,7 @@ function wroteKind(target, sorted) {
   if (r !== null && c !== null) return "cell";
   if (extra === null) return null;
   if (r !== null && sorted && extra === "pos") return "sort:row";
+  if (r === null && c === null && extra.startsWith("rule:")) return extra;
   const kind = r !== null ? `row:${KIND_OF[extra]}` : c !== null ? `col:${KIND_OF[extra]}` : extra === "name" || extra === "pos" ? `tab:${extra}` : `freeze:${KIND_OF[extra]}`;
   return WROTE_KINDS[kind] ? kind : null;
 }
@@ -687,6 +738,7 @@ function wroteTarget([s, r, c, kind]) {
   if (kind === "row:style") return `${rowId(s, r)}#rowstyle`;
   if (kind.startsWith("col:")) return `${colId(s, c)}#${kind.slice(4)}`;
   if (kind.startsWith("tab:")) return `${tabId(s)}#${kind.slice(4)}`;
+  if (kind.startsWith("rule:")) return `${tabId(s)}#${kind}`;
   return `${tabId(s)}#${kind === "freeze:rows" ? "freezeRows" : "freezeCols"}`;
 }
 
@@ -705,6 +757,10 @@ function fieldPrint(doc, frame, [s, r, c, kind]) {
   if (kind.startsWith("col:")) {
     const col = tab.sheet.cols[colAt(tab.sheet, c)];
     return col ? WROTE_KINDS[kind](col) : null;
+  }
+  if (kind.startsWith("rule:")) {
+    const found = (tab.sheet.rules ?? []).find((one) => one.id === kind.slice(5)) ?? null;
+    return rulePrint(tab.sheet, found);
   }
   return WROTE_KINDS[kind](tab);
 }
@@ -813,6 +869,12 @@ function filterStep(doc, action, skipped, dropped, live = null) {
     });
     return list.length === 0 ? null : { ...action, [axis]: list };
   }
+  if (action.t === "rules") {
+    const set = action.set.filter((rule) => !skipped.has(ruleId(s, rule.id)));
+    const remove = action.remove.filter((id) => !skipped.has(ruleId(s, id)));
+    if (set.length === action.set.length && remove.length === action.remove.length) return action;
+    return set.length === 0 && remove.length === 0 ? null : { ...action, set, remove };
+  }
   if (action.t === "merge") {
     const cells = [action.from, ...(action.clears ?? [])].map(([r, c]) => cellId(s, r, c));
     if (!cells.some((id) => skipped.has(id))) return action;
@@ -834,6 +896,7 @@ function filterStep(doc, action, skipped, dropped, live = null) {
 // to), so the row still comes back; the cells and merges it leaves out go in `lost`.
 function recordsOnly(action, lost, keep = () => false) {
   if (action.t === "batch") return oneOrBatch(action.actions.flatMap((one) => unpack(recordsOnly(one, lost, keep))));
+  if (action.t === "rules") return null;
   const s = action.sheet;
   if (action.t === "merge" || action.t === "unmerge") {
     lost.push(cellId(s, ...(action.t === "merge" ? action.from : [action.row, action.col])));
@@ -927,7 +990,7 @@ function applyRevert(doc, action) {
     const gone = new Set([...skipped, ...dropped, ...one.lost]);
     const restore = action.step.restore.filter(([s, r, c]) => !gone.has(cellId(s, r, c)));
     const wb = workbookOf(doc);
-    const out = applyWorkbook(wb, { action: one.step, restore, rules: action.step.rules ?? [] }, {});
+    const out = applyWorkbook(wb, { action: one.step, restore, rules: (action.step.rules ?? []).filter(([s, id]) => !gone.has(ruleId(s, id))) }, {});
     if (out.out !== "applied") {
       refused = out;
       continue;
@@ -945,9 +1008,9 @@ function applyRevert(doc, action) {
 // every field the action wrote and every field its undo will write (a format change's undo also
 // writes each cell's shown text). A new tab's cells count as written.
 function revertOf(doc, action, step) {
-  const made = action.t === "insertSheet" ? cellsOfRecord(doc, action.sheet.id, "tab").map(([id]) => id) : [];
+  const made = action.t === "insertSheet" ? [...cellsOfRecord(doc, action.sheet.id, "tab").map(([id]) => id), ...(tabIn(doc, action.sheet.id)?.sheet.rules ?? []).map((rule) => ruleId(action.sheet.id, rule.id))] : [];
   const sorted = action.t === "sort" && action.cols === null;
-  return { v: 1, t: "revert", of: null, step, wrote: wroteOf(doc, frameOfDoc(doc), [...targets(action), ...(step ? targets(step.action) : []), ...made], sorted) };
+  return { v: 1, t: "revert", of: null, step, wrote: wroteOf(doc, frameOfDoc(doc), [...targets(action), ...(step ? targets(step.action) : []), ...made, ...(step?.rules ?? []).map(([s, id]) => ruleId(s, id))], sorted) };
 }
 
 function apply(doc, action) {
@@ -990,12 +1053,12 @@ function mergeBox(doc, action) {
 // Value targets: what an author saw and a conflict names. A merge's cleared cells and a narrow
 // sort's cells are judged like a paste's (design 3.7); a whole-width sort's row keys, like any
 // move, are not, so a coworker's edit stays on its line.
-const VALUE_KINDS = new Set(["set", "format", "changeRows", "changeCols", "merge", "sort", "renameSheet", "freeze", "batch"]);
+const VALUE_KINDS = new Set(["set", "format", "changeRows", "changeCols", "merge", "sort", "renameSheet", "freeze", "rules", "batch"]);
 const isValueTarget = (target) => {
   const { row: r, col: c, extra } = parseId(target);
   if (r !== null && c !== null) return extra !== "span";
   if (r !== null || c !== null) return extra !== null && extra !== "pos";
-  return extra === "name" || extra === "freezeRows" || extra === "freezeCols";
+  return extra === "name" || extra === "freezeRows" || extra === "freezeCols" || (extra !== null && extra.startsWith("rule:"));
 };
 const valueTargets = (action) => (VALUE_KINDS.has(action.t) ? targets(action).filter(isValueTarget) : []);
 
@@ -1005,7 +1068,7 @@ function recordPrint(doc, frame, s, kind, id) {
   if (!tab) return fp("~gone");
   const cells = (list) => list.filter(Boolean).sort();
   if (kind === "tab") {
-    return fp([tab.name, tab.pos, tab.sheet.freezeCols ?? 0, ...cells(tab.sheet.cols.map((col) => `${col.id}=${colPrint(col)}`)), ...cells(tab.sheet.rows.map((row) => `${row.id}=${recordPrint(doc, frame, s, "row", row.id)}`))].join("\u0000"));
+    return fp([tab.name, tab.pos, tab.sheet.freezeCols ?? 0, ...cells(tab.sheet.cols.map((col) => `${col.id}=${colPrint(col)}`)), ...cells(tab.sheet.rows.map((row) => `${row.id}=${recordPrint(doc, frame, s, "row", row.id)}`)), ...cells((tab.sheet.rules ?? []).map((rule) => `${rule.id}=${rulePrint(tab.sheet, rule)}`))].join("\u0000"));
   }
   if (kind === "row") {
     const at = rowAt(tab.sheet, id);
@@ -1077,6 +1140,9 @@ function cellsOfRecord(doc, s, kind, id) {
   return out;
 }
 
+const rulesOfTab = (doc, s) => (tabIn(doc, s)?.sheet.rules ?? []).map((rule) => [ruleId(s, rule.id), copyRule(rule)]);
+const itemsOfRecord = (doc, s, kind, id) => (kind === "tab" ? [...cellsOfRecord(doc, s, kind, id), ...rulesOfTab(doc, s)] : cellsOfRecord(doc, s, kind, id));
+
 // What a removal deletes that its author did not see: for a revert (an undo of an insert, or of a
 // paste that grew the sheet), each cell of a removed record that differs from what the undone
 // action wrote; for any other action, the cells of each record that changed since the saw, or one
@@ -1088,7 +1154,13 @@ function unseen(doc, action, saw) {
   const out = [];
   if (action.t === "revert") {
     const wrote = new Map(action.wrote.filter((entry) => entry[3] === "cell").map((entry) => [cellId(entry[0], entry[1], entry[2]), entry[4]]));
+    const wroteRules = new Map(action.wrote.filter((entry) => entry[3].startsWith("rule:")).map((entry) => [`${tabId(entry[0])}#${entry[3]}`, entry[4]]));
     for (const one of gone) {
+      if (one.kind === "tab") {
+        for (const [target, rule] of rulesOfTab(doc, one.s)) {
+          if (wroteRules.get(target) !== rulePrint(tabIn(doc, one.s).sheet, rule)) out.push([target, rule]);
+        }
+      }
       for (const [target, content] of cellsOfRecord(doc, one.s, one.kind, one.of)) {
         const { row: r, col: c } = parseId(target);
         if (wrote.get(target) !== cellPrint(doc, frame, one.s, cellOf(doc, one.s, r, c).cell)) out.push([target, content]);
@@ -1096,14 +1168,14 @@ function unseen(doc, action, saw) {
     }
     return out.slice(0, UNSEEN_CAP);
   }
-  if (saw === null) return gone.flatMap((one) => cellsOfRecord(doc, one.s, one.kind, one.of)).slice(0, UNSEEN_CAP);
+  if (saw === null) return gone.flatMap((one) => itemsOfRecord(doc, one.s, one.kind, one.of)).slice(0, UNSEEN_CAP);
   if (!Array.isArray(saw)) return [];
   const offset = valueTargets(action).length;
   let changed = null;
   gone.forEach((one, i) => {
     if (saw[offset + i] === recordPrint(doc, frame, one.s, one.kind, one.of)) return;
     changed ??= one.id;
-    out.push(...cellsOfRecord(doc, one.s, one.kind, one.of));
+    out.push(...itemsOfRecord(doc, one.s, one.kind, one.of));
   });
   if (out.length === 0 && changed !== null) return [[changed, null]];
   return out.slice(0, UNSEEN_CAP);
@@ -1157,6 +1229,10 @@ function current(doc, target) {
     const col = tab.sheet.cols[colAt(tab.sheet, c)];
     return !col ? null : extra === null ? col.id : col[extra] ?? null;
   }
+  if (extra !== null && extra.startsWith("rule:")) {
+    const found = (tab.sheet.rules ?? []).find((one) => one.id === extra.slice(5));
+    return found ? copyRule(found) : null;
+  }
   // A freeze line as a freeze action names it: the last frozen row or column, or null.
   if (extra === "freezeRows") return tab.sheet.rows.filter((row) => row.frozen).at(-1)?.id ?? null;
   if (extra === "freezeCols") return tab.sheet.cols[(tab.sheet.freezeCols ?? 0) - 1]?.id ?? null;
@@ -1182,14 +1258,30 @@ const TITLES = {
   renameSheet: "Rename a tab",
   moveSheet: "Move a tab",
   sort: "Sort",
+  rules: "Edit rules",
   revert: "Undo",
 };
 
-function label(doc, target) {
-  const { sheet: s, row: r, col: c } = parseId(target);
+const RULE_LABELS = {
+  check: "Checkbox",
+  list: "Dropdown",
+  when: "Conditional format",
+  scale: "Color scale",
+  chart: "Chart",
+};
+
+function label(doc, target, stored = null) {
+  const { sheet: s, row: r, col: c, extra } = parseId(target);
   const tab = tabIn(doc, s);
   if (!tab) return s;
   const name = tab.name;
+  if (r === null && c === null && extra !== null && extra.startsWith("rule:")) {
+    const id = extra.slice(5);
+    const rule = stored ?? current(doc, target);
+    if (!rule) return `${name}: Rule ${id}`;
+    if (rule.kind === "chart" && rule.title) return `${name}: ${rule.title}`;
+    return `${name}: ${RULE_LABELS[rule.kind] ?? "Rule"} ${rule.range}`;
+  }
   const ri = r === null ? -1 : rowAt(tab.sheet, r);
   const ci = c === null ? -1 : colAt(tab.sheet, c);
   if (ri >= 0 && ci >= 0) return `${name}!${colName(ci)}${ri + 1}`;
@@ -1201,10 +1293,17 @@ function label(doc, target) {
 // What the action stores at a target, as `current` reads it: a formula sent with ids is printed in
 // the doc's frame, as `apply` would write it. The last part of a batch to write it wins.
 function storedOf(doc, action, target) {
-  const { row: r, col: c, extra } = parseId(target);
+  const { sheet: s, row: r, col: c, extra } = parseId(target);
   const parts = action.t === "batch" ? action.actions : [action];
   for (let i = parts.length - 1; i >= 0; i--) {
     const part = parts[i];
+    if (part.t === "rules" && part.sheet === s && r === null && c === null && extra !== null && extra.startsWith("rule:")) {
+      const id = extra.slice(5);
+      if (part.remove.includes(id)) return null;
+      const entry = part.set.find((rule) => rule.id === id);
+      if (!entry) continue;
+      return copyRule(entry);
+    }
     // A one-column sort writes into a row the cell of the row it puts in that row's place.
     if (part.t === "sort" && part.cols !== null && extra === null && part.cols.includes(c)) {
       const tab = tabIn(doc, part.sheet);
@@ -1245,7 +1344,13 @@ function storedOf(doc, action, target) {
 
 function describe(action, doc) {
   const shown = action.t === "revert" ? action.step?.action ?? action : action;
-  return { title: TITLES[action.t] ?? "Edit", cells: valueTargets(shown).map((target) => ({ target, label: label(doc, target), stored: storedOf(doc, shown, target) })) };
+  return {
+    title: TITLES[action.t] ?? "Edit",
+    cells: valueTargets(shown).map((target) => {
+      const stored = storedOf(doc, shown, target);
+      return { target, label: label(doc, target, stored), stored };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1300,6 +1405,48 @@ const partOps = (part) => part.n;
 
 const docBytes = (doc) => utf8(JSON.stringify(doc));
 
+// Each tab's print as the codec compares it: name, place, frozen columns, columns, rows, each cell's
+// content, format, style and spans, and the rules; no results or shown text. Two docs whose digests
+// are equal hold the same sheet for a room.
+function digest(doc) {
+  const frame = frameOfDoc(doc);
+  return Object.fromEntries(doc.tabs.map((tab) => [tab.id, recordPrint(doc, frame, tab.id, "tab", tab.id)]));
+}
+
+// Calculates every formula in `doc` without a DOM and returns the `extras` function `write` takes.
+// Volatile functions run through `quiet` (David's answer 7). A formula that calls an unloaded
+// function (or reads one) returns undefined so `write` keeps its tab marked `stale` for a browser
+// that loads the extended pack. Disposes the temporary engine before returning.
+export function results(doc, options = {}) {
+  const hasFormula = doc.tabs.some((tab) => tab.sheet.rows.some((row) => row.cells.some((cell) => cell && !cell.hidden && cell.f !== undefined)));
+  if (!hasFormula) return () => undefined;
+  const wb = modelWorkbook(doc.tabs);
+  const engine = createEngine(wb, { quiet: (fn) => fn(), ...options });
+  const computed = new Map();
+  try {
+    engine.load();
+    const pending = engine.unresolved();
+    for (const tab of doc.tabs) {
+      const { rows, cols } = tab.sheet;
+      for (const row of rows) {
+        for (let c = 0; c < row.cells.length; c++) {
+          const cell = row.cells[c];
+          if (!cell || cell.hidden || cell.f === undefined) continue;
+          const col = cols[c];
+          if (!col) continue;
+          const key = `${tab.id}\u0000${row.id}\u0000${col.id}`;
+          if (pending.has(key)) continue;
+          const extra = engine.extras(tab.id, row.id, col.id);
+          if (extra !== undefined) computed.set(key, extra);
+        }
+      }
+    }
+  } finally {
+    engine.dispose();
+  }
+  return (tabId, rowId, colId) => computed.get(`${tabId}\u0000${rowId}\u0000${colId}`);
+}
+
 export const sheetCodec = Object.freeze({
   name: ROOM_CODEC_NAME,
   version: ROOM_CODEC_VERSION,
@@ -1326,5 +1473,8 @@ export const sheetCodec = Object.freeze({
   holds,
   describe,
   current,
+  digest,
   preview,
+  drawingsIn,
+  results,
 });
