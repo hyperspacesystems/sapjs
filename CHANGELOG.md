@@ -98,6 +98,14 @@
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-23
+
+### Fixed
+- Grid formulas in X2 now calculate correctly.
+- Rooms keep the encoding they had before the codec change.
+- Hidden digests stay out of view.
+- `describe` now reports a document's details correctly.
+
 ## [0.11.0] - 2026-11-20
 
 ### Added
