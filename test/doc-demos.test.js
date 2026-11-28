@@ -145,6 +145,7 @@ describe("Q2 — rich text: a bind is plain textContent (no HTML-valued state)",
     const editable = root.querySelector('[bind="note"]');
     expect(editable.getAttribute("contenteditable")).toBe("plaintext-only");
     expect(root.querySelector('[text="state.note"]').textContent).toBe("Clay is squishy.");
+    expect(Sap.status().apps.at(-1).mountWrites).toBe(0); // the saved markup already matches its paints
 
     // simulate a paste of formatted HTML: the carrier reads textContent, dropping markup
     editable.innerHTML = "<b>bold</b> and <i>italic</i>";
