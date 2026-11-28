@@ -306,20 +306,37 @@ test("a hidden note beside a rowspan keeps every value in the column the browser
   expect(checkSheet(repairedSheet)).toEqual([]);
 });
 
-test("a thousand rows of stacked spans repair under the bound, in linear time", () => {
-  const positions = keysBetween(null, null, 1000);
-  const rows = Array.from({ length: 1000 }, (_, r) => [
+// Four times the rows takes about eleven times as long under Jest today; quadratic work would take
+// sixteen. Both sizes run in this process at this moment, so a loaded machine slows both alike
+// (a fixed millisecond limit failed under hypersave's parallel checks), and the fastest of three
+// runs keeps one garbage collection pause from deciding.
+const stackedSpans = (count) => {
+  const positions = keysBetween(null, null, count);
+  const rows = Array.from({ length: count }, (_, r) => [
     `r${r}`,
     positions[r],
     [0, 1, 2].map((m) => ({ text: `x${r}.${m}`, colspan: 1000, rowspan: 65534 })),
   ]);
-  const model = sheet({ cols: [["c0", "G"]], rows });
-  const started = Date.now();
-  const { sheet: repairedSheet } = normalizeSheet(model, { derive });
-  const took = Date.now() - started;
-  expect(took).toBeLessThan(1000);
-  expect(repairedSheet.cols.length).toBeLessThanOrEqual(1000);
-  expect(checkSheet(repairedSheet)).toEqual([]);
+  return sheet({ cols: [["c0", "G"]], rows });
+};
+const repairTime = (count) => {
+  let took = Infinity;
+  let repairedSheet;
+  for (let run = 0; run < 3; run++) {
+    const model = stackedSpans(count);
+    const started = performance.now();
+    repairedSheet = normalizeSheet(model, { derive }).sheet;
+    took = Math.min(took, performance.now() - started);
+  }
+  return { took, repairedSheet };
+};
+
+test("a thousand rows of stacked spans repair under the bound, in less than quadratic time", () => {
+  const quarter = repairTime(250);
+  const full = repairTime(1000);
+  expect(full.took / quarter.took).toBeLessThan(16);
+  expect(full.repairedSheet.cols.length).toBeLessThanOrEqual(1000);
+  expect(checkSheet(full.repairedSheet)).toEqual([]);
 });
 
 test("rules kept out of (pos, id) order come back sorted, with a rule_pos_order repair", () => {
