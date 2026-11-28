@@ -113,7 +113,7 @@ describe("Text & rich editors — a bind is plain textContent; rich editors live
     const { root } = mountDemo("richtext-contenteditable");
     const editable = root.querySelector('[bind="note"]');
     expect(editable.getAttribute("contenteditable")).toBe("plaintext-only");
-    expect(root.querySelector('[text="state.note"]').textContent).toBe("Clay is malleable.");
+    expect(root.querySelector('[text="state.note"]').textContent).toBe("Clay is squishy.");
 
     editable.innerHTML = "<b>bold</b> and <i>italic</i>"; // a paste of formatted HTML
     fire(editable);

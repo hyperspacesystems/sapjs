@@ -46,7 +46,7 @@ const page = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<meta name="description" content="How to build malleable document apps (trackers, boards, notes) in one HTML file with sapjs and ClayJS.">
+<meta name="description" content="How to build HTML file apps (trackers, boards, notes) with sapjs and ClayJS.">
 <link rel="canonical" href="https://saphtml.com/guide.html">
 <link rel="alternate" type="text/markdown" href="./guide.md">
 <link rel="icon" href="./favicon.svg" type="image/svg+xml">

@@ -895,7 +895,7 @@ code degrades per element, and the rest of the app keeps running.
 
 ## Hyperclay and clayjs integration
 
-sapjs runs standalone in any HTML file and needs no platform. When one of the malleable-HTML
+sapjs runs standalone in any HTML file and needs no platform. When one of the HTML file app
 clients is loaded (`window.hyperclay` from hyperclayjs, or `window.clay` from clayjs) sapjs
 detects each capability independently and uses it:
 
@@ -980,4 +980,4 @@ mirror a derived plaintext value into a normal field.
 - CDN: https://cdn.jsdelivr.net/npm/@panphora/sapjs/dist/sap.min.js
 - Issues: https://github.com/panphora/sapjs/issues
 - Hyperclay, the platform sapjs rides when present: https://hyperclay.com
-- clayjs, the malleable-HTML client that bundles sapjs as a satellite: https://clayjs.com
+- clayjs, the HTML file app client that bundles sapjs as a satellite: https://clayjs.com
