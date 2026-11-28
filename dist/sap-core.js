@@ -2199,7 +2199,7 @@ ${src}` : `"use strict"; return (${src});`;
   }
 
   // src/version.js
-  var VERSION = "0.11.1";
+  var VERSION = "0.11.2";
 
   // src/plugin-manifest.js
   var PLUGIN_API = 1;
