@@ -171,6 +171,9 @@ test("Sap.grid exists after install, and Sap.use called twice still gives one gr
   expect([g.get("A3"), heard.map((event) => event.source)]).toEqual(["Meals", ["dom", "dom"]]);
 });
 
+// It mounts every golden table and repair input (19 or more): under a second alone, but over
+// Jest's default 5 s under hypersave's parallel checks, and a timed-out mount spills into the
+// next tests.
 test("mount leaves the bytes of every fixture unchanged", async () => {
   install();
   const fixtures = [...goldenTables(), ...repairInputs()];
@@ -183,7 +186,7 @@ test("mount leaves the bytes of every fixture unchanged", async () => {
     seen.push([fixture.name, p.records(), p.root.innerHTML === p.before, grid.size.rows === p.table.rows.length]);
   }
   expect(seen).toEqual(fixtures.map((fixture) => [fixture.name, 0, true, true]));
-});
+}, 30000);
 
 test('a raw td.textContent = "5" gives one event with source "dom", the mirror has 5, the old v is gone and n is on the cell, with no extra pass', async () => {
   install();
